@@ -235,6 +235,21 @@ Commons (ricerca geografica, 1,5 km attorno a 3 punti del sentiero o 400 m attor
 e mostra autore e licenza di ciascuna. Servono la connessione e foto geolocalizzate nella
 zona: in alcune valli poco fotografate non c'è nulla.
 
+## 6. Chiusure (fase 5)
+
+I dati SAT non hanno un campo di stato: le chiusure stanno solo in **`data/closures.yaml`**,
+gestito a mano (le istruzioni sono in testa al file). Due tipi:
+
+- **stagionale**: si ripete ogni anno, `dal`/`al` come "1 novembre" o "11-01", può scavalcare il capodanno;
+- **puntuale**: una volta sola, `dal`/`al` come AAAA-MM-GG; senza `al` resta chiuso fino a nuovo avviso.
+
+Un numero SAT chiude tutte le sue varianti (E396 → E396 ed E396-b); un id di variante solo
+quella. La build valida il file e si ferma con un messaggio chiaro se c'è un errore: sentiero
+inesistente, data impossibile, fine prima dell'inizio. Output: `data/processed/closures.json`,
+`{id_sentiero: [{tipo, dal, al, motivo, fonte}]}`. L'app calcola chi è chiuso nella data
+scelta: riquadro "Chiuso" nella scheda, "CHIUSO" nella lista dei risultati, filtro "Solo
+sentieri aperti".
+
 ## Dati mancanti, riassunto
 
 1. Stato aperto/chiuso dei sentieri → solo `data/closures.yaml`.

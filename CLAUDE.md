@@ -113,4 +113,5 @@ docs/            documentazione (DATA.md, ...)
   Niente segreti nel repo: non aggiungere mai token o dati personali.
 - **Fase 3** ✅ mappa pulita: sfondo vettoriale + rilievo, selettore sfondo, tratti con ombra e bordo chiaro.
 - **Fase 4** ✅ POI OSM + valli, badge di prossimità, dislivello e profilo dal DEM, filtri, ricerca, foto Wikimedia, icone POI. Dettagli dati in `docs/DATA.md` §5. Il design dell'app si rifà alla fine: per ora lo stile è funzionale.
-- Fasi successive da pianificare (POI, ricerca, filtri, chiusure, PWA, meteo).
+- **Fase 5** — chiusure ✅ (`data/closures.yaml` → `pipeline/closures.py` → `closures.json`; `web/src/closures.ts`, filtro "Solo sentieri aperti"). Sentieri salvati e sincronizzati: in valutazione, **non implementare senza conferma dell'utente** (proposta: Firebase Auth + Firestore, piano Spark).
+- Fasi successive da pianificare (PWA offline, meteo, design finale).

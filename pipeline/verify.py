@@ -145,7 +145,13 @@ def main() -> int:
     check(trails.badge.map(len).gt(0).mean() > 0.5,
           f"{trails.badge.map(len).gt(0).mean():.0%} dei sentieri ha almeno un badge")
 
-    print("\n11. Totali")
+    print("\n11. Chiusure (data/closures.yaml)")
+    chiusure = json.loads((P / "closures.json").read_text(encoding="utf-8"))
+    unknown = set(chiusure) - set(trails.id)
+    check(not unknown, f"{sum(map(len, chiusure.values()))} chiusure su {len(chiusure)} sentieri, tutti esistenti"
+          + (f" (sconosciuti: {sorted(unknown)})" if unknown else ""))
+
+    print("\n12. Totali")
     for c, km in meta["km_per_colore"].items():
         print(f"  {c:7s} {km:7.1f} km")
 

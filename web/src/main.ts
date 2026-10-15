@@ -6,6 +6,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import './style.css'
 
 import { attachToBasemap, FIRST_LABEL, FONT, LABEL_FONT, setBasemap, style, type Basemap } from './basemap'
+import { isClosedOn, type Closures } from './closures'
 import { activeCount, defaultFilters, matches, renderForm, type KmByColor } from './filters'
 import { effective, isActive, today, type Effective } from './flight'
 import { CATEGORIES, CATEGORY_ORDER, registerIcons } from './icons'
@@ -121,13 +122,14 @@ async function load<T>(name: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-const [segments, zonesFC, trailList, meta, poisFC, valleysFC] = await Promise.all([
+const [segments, zonesFC, trailList, meta, poisFC, valleysFC, closures] = await Promise.all([
   load<FC<SegmentProps>>('segments.geojson'),
   load<FC<ZoneProps>>('zones.geojson'),
   load<Trail[]>('trails.json'),
   load<Meta>('meta.json'),
   load<FC<PoiProps>>('pois.geojson'),
   load<FC<ValleyProps>>('valleys.geojson'),
+  load<Closures>('closures.json'),
   new Promise((resolve) => map.once('load', resolve)),
 ]).catch((err) => {
   $('status').textContent = `Errore nel caricamento dei dati: ${err.message}`
@@ -167,6 +169,7 @@ const gruppi = [...new Set(trailList.map((t) => t.gruppo_montuoso).filter((g): g
 let day = today()
 let eff = new Map<string, Effective>()
 let trailKm = new Map<string, KmByColor>()
+let closedIds = new Set<string>() // sentieri chiusi nella data scelta
 type Selection =
   | { kind: 'trail'; id: string; seg?: string }
   | { kind: 'zones'; ids: string[]; back?: Selection }
@@ -408,6 +411,8 @@ function applyDay(): void {
   for (const f of zonesFC.features) (f.properties as ZoneProps & { attiva: boolean }).attiva = isActive(f.properties, day)
   ;(map.getSource('zones') as GeoJSONSource).setData(zonesFC)
 
+  closedIds = new Set(Object.entries(closures).filter(([, list]) => list.some((c) => isClosedOn(c, day))).map(([id]) => id))
+
   const notam = [...zones.values()].filter((z) => !z.permanente && z.sui_sentieri && isActive(z, day)).length
   $('status').textContent = notam ? `${notam} NOTAM attivi sui sentieri in questa data` : ''
   $('status').hidden = !notam
@@ -498,6 +503,10 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     trail,
     segment: seg ? { seg, eff: eff.get(seg.id)! } : undefined,
     trailKm: trailKm.get(trail.id)!,
+    closures: {
+      all: closures[trail.id] ?? [],
+      active: (closures[trail.id] ?? []).filter((c) => isClosedOn(c, day)),
+    },
     zones,
     pois,
     profile: profileBox,
@@ -603,7 +612,7 @@ function applyFilters(): void {
   const ok = new Set<string>()
   const results: Trail[] = []
   for (const t of trailList) {
-    if (matches(t, trailKm.get(t.id) ?? { verde: 0, giallo: 0, rosso: 0 }, filters)) {
+    if (matches(t, trailKm.get(t.id) ?? { verde: 0, giallo: 0, rosso: 0 }, filters, closedIds.has(t.id))) {
       ok.add(t.id)
       results.push(t)
     }
@@ -628,6 +637,7 @@ function applyFilters(): void {
   for (const t of results.slice(0, MAX_RESULTS_SHOWN)) {
     const k = km(t)
     const meta = [
+      closedIds.has(t.id) ? 'CHIUSO' : null,
       kmVal((t.lunghezza_m ?? 0) / 1000),
       t.dislivello_pos != null ? `+${t.dislivello_pos} m` : null,
       t.difficolta,

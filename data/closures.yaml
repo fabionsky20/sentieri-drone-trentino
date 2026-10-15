@@ -1,0 +1,37 @@
+# Chiusure dei sentieri, gestite a mano.
+#
+# Ogni voce chiude uno o più sentieri interi in un periodo. L'app la applica in base alla
+# data scelta ("Volo il …"): badge "Chiuso" nella scheda e filtro "solo aperti".
+# Dopo una modifica: .venv\Scripts\python -m pipeline.build --offline, poi commit e push.
+#
+# Campi:
+#   sentieri  lista di numeri SAT, es. [E310, O207]. Un numero vale per tutte le sue varianti
+#             (E396 chiude anche E396-b); per chiudere solo una variante scrivi l'id (E396-b).
+#   tipo      stagionale  → si ripete ogni anno; dal/al come "giorno mese" (es. "1 novembre")
+#                           oppure "MM-GG" (es. "11-01"). Può scavalcare il capodanno.
+#             puntuale    → una volta sola; dal/al come data AAAA-MM-GG. Senza "al" resta
+#                           chiuso fino a nuovo avviso.
+#   dal, al   inizio e fine, entrambi inclusi.
+#   motivo    testo mostrato nella scheda (es. "frana", "pericolo valanghe").
+#   fonte     facoltativo: dove l'hai letto (link all'avviso SAT, al Comune, …).
+#
+# Esempi:
+#   - sentieri: [E542]
+#     tipo: puntuale
+#     dal: 2026-10-20
+#     al: 2026-11-15
+#     motivo: Frana sul tratto attrezzato
+#     fonte: https://www.sat.tn.it/
+#
+#   - sentieri: [O207, O211]
+#     tipo: puntuale
+#     dal: 2026-11-01
+#     motivo: Lavori al ponte (fino a nuovo avviso)
+
+chiusure:
+  # PROVA: chiusura stagionale di esempio, non reale. Cancellala quando non serve più.
+  - sentieri: [E310]
+    tipo: stagionale
+    dal: 1 novembre
+    al: 31 maggio
+    motivo: "PROVA (non reale): chiusura invernale di esempio"

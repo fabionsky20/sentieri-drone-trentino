@@ -818,3 +818,28 @@ dd {
 .photos .credit {
   grid-column: 1 / -1;
 }
+
+/* ------------------------------------------------------------ chiusure (fase 5) */
+
+.badge.chiuso {
+  background: #7f1d1d;
+}
+
+.closed {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  border-radius: var(--radius);
+  padding: 10px 12px 4px;
+  margin: 10px 0;
+}
+
+.closed ul,
+.closure-note ul {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+
+.closure-note p {
+  margin: 8px 0 0;
+}

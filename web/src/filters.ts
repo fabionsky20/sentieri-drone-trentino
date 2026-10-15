@@ -8,6 +8,7 @@ export type Volo = 'qualsiasi' | 'verde' | 'tutto'
 export type KmByColor = { verde: number; giallo: number; rosso: number }
 
 export interface FilterState {
+  soloAperti: boolean // esclude i sentieri chiusi nella data scelta
   volo: Volo
   verdeKm: number // per volo = 'verde': almeno questi km di tratti verdi
   vicino: Set<PoiCategory> // deve avere TUTTE le categorie scelte
@@ -20,6 +21,7 @@ export interface FilterState {
 }
 
 export const defaultFilters = (): FilterState => ({
+  soloAperti: false,
   volo: 'qualsiasi',
   verdeKm: 1,
   vicino: new Set(),
@@ -40,13 +42,15 @@ export function activeCount(f: FilterState): number {
     Number(f.lungMin != null || f.lungMax != null) +
     Number(f.dislMax != null) +
     Number(f.quotaMin != null) +
-    Number(!!f.gruppo)
+    Number(!!f.gruppo) +
+    Number(f.soloAperti)
   )
 }
 
 const diffGroup = (d: string | null) => (d?.startsWith('EEA') ? 'EEA' : (d ?? ''))
 
-export function matches(t: Trail, km: KmByColor, f: FilterState): boolean {
+export function matches(t: Trail, km: KmByColor, f: FilterState, closed: boolean): boolean {
+  if (f.soloAperti && closed) return false
   if (f.volo === 'verde' && km.verde < f.verdeKm) return false
   if (f.volo === 'tutto' && km.rosso > 0.005) return false
   for (const c of f.vicino) if (!t.badge.includes(c)) return false
@@ -157,6 +161,17 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
   })
   const gruppoBox = h('fieldset', {}, h('legend', {}, 'Gruppo montuoso'), select)
 
-  form.append(voloBox, vicinoBox, diffBox, numBox, gruppoBox)
+  // Stato del sentiero
+  const statoBox = h(
+    'fieldset',
+    {},
+    h('legend', {}, 'Stato (nella data scelta)'),
+    checkbox('Solo sentieri aperti', f.soloAperti, (on) => {
+      f.soloAperti = on
+      onChange()
+    }),
+  )
+
+  form.append(statoBox, voloBox, vicinoBox, diffBox, numBox, gruppoBox)
   return form
 }

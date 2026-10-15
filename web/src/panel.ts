@@ -1,6 +1,7 @@
 // Contenuto del pannello informativo (tratto di sentiero o zone D-Flight).
 // Tutto il testo passa da textContent: nessun HTML dei dati viene interpretato.
 
+import { periodLabel, type Closure } from './closures'
 import { split, type Effective } from './flight'
 import { CATEGORIES, iconDataUrl } from './icons'
 import type { PoiCategory, PoiProps, Restriction, SegmentProps, Trail, ZoneProps } from './types'
@@ -76,6 +77,7 @@ export interface TrailView {
   /** Il tratto toccato sulla mappa (assente se il sentiero arriva da filtri o ricerca). */
   segment?: { seg: SegmentProps; eff: Effective }
   trailKm: { verde: number; giallo: number; rosso: number }
+  closures: { all: Closure[]; active: Closure[] } // tutte / in vigore nella data scelta
   zones: Map<string, ZoneProps>
   pois: Map<string, PoiProps>
   profile: HTMLElement // contenitore del profilo, riempito da chi chiama
@@ -115,6 +117,27 @@ function segmentSection(v: TrailView): HTMLElement | null {
     section.append(btn)
   }
   return section
+}
+
+/** Chiusure: riquadro rosso se il sentiero è chiuso nella data scelta, nota se lo sarà in altri periodi. */
+function closureSection(c: { all: Closure[]; active: Closure[] }): HTMLElement | null {
+  if (!c.all.length) return null
+  const item = (x: Closure) =>
+    h(
+      'li',
+      {},
+      `${x.motivo ?? 'Chiuso'} (${periodLabel(x)})`,
+      x.fonte ? h('span', {}, ' · ', h('a', { href: x.fonte, target: '_blank', rel: 'noopener' }, 'fonte')) : null,
+    )
+  if (c.active.length) {
+    return h(
+      'section',
+      { class: 'closed' },
+      h('span', { class: 'badge chiuso' }, 'Chiuso nella data scelta'),
+      h('ul', {}, ...c.active.map(item)),
+    )
+  }
+  return h('section', { class: 'closure-note' }, h('p', { class: 'muted small' }, 'Aperto nella data scelta. Chiusure previste:'), h('ul', {}, ...c.all.map(item)))
 }
 
 /** Badge riassuntivi: una icona per categoria presente lungo il sentiero. */
@@ -162,6 +185,7 @@ export function renderTrail(v: TrailView): HTMLElement {
     h('h2', {}, trail.titolo),
     trail.nome ? h('p', { class: 'sub' }, `${trail.loc_inizio} → ${trail.loc_fine}`) : null,
     trail.badge.length ? badgeRow(trail.badge) : null,
+    closureSection(v.closures),
     segmentSection(v),
     h(
       'dl',

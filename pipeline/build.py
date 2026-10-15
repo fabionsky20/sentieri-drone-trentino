@@ -12,6 +12,7 @@ Legge i file più recenti in data/raw/ e scrive in data/processed/:
 - valleys.geojson    valli con nome, per le etichette
 - profiles.json      profilo altimetrico ridotto per sentiero
 - search.json        indice per la ricerca testuale
+- closures.json      chiusure per sentiero, da data/closures.yaml
 e aggiorna lo scheletro di data/authorities.yaml.
 
 Scarica da internet solo ciò che manca nelle cache (POI OSM, tile DEM).
@@ -30,7 +31,7 @@ import geopandas as gpd
 import shapely
 from shapely.geometry import box
 
-from . import authorities, config, dem, dflight, enrich, osm, sat, segments
+from . import authorities, closures, config, dem, dflight, enrich, osm, sat, segments
 
 
 def write_geojson(gdf: gpd.GeoDataFrame, name: str, tolerance: float) -> int:
@@ -108,6 +109,14 @@ def main() -> int:
         row["bbox"] = bounds.loc[i].tolist()
         trail_rows.append(row)
 
+    # ---- Chiusure (data/closures.yaml)
+    try:
+        chiusure = closures.load(list(trails.id), dict(zip(trails.id, trails.numero)))
+    except closures.ClosureError as e:
+        print(f"ERRORE in data/closures.yaml: {e}")
+        return 1
+    print(f"Chiusure: {sum(map(len, chiusure.values()))} su {len(chiusure)} sentieri")
+
     # ---- POI da OpenStreetMap
     wgs_bounds = trails.to_crs(config.WEB_CRS).total_bounds + [-0.04, -0.03, 0.04, 0.03]
     if not args.offline:
@@ -141,6 +150,7 @@ def main() -> int:
         "zones.geojson": write_geojson(zones, "zones.geojson", config.SIMPLIFY_ZONES_M),
         "trails.json": write_json(trail_rows, "trails.json"),
         "profiles.json": write_json(profs, "profiles.json"),
+        "closures.json": write_json(chiusure, "closures.json"),
     }
     pois_out = pois.drop(columns=["forma"])
     pois_out["ele"] = pois_out.ele.astype("Int64")
