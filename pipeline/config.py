@@ -28,3 +28,24 @@ MIN_PIECE_M = 0.05
 
 # Limiti superiori oltre questo valore (m) sono placeholder D-Flight per "illimitato".
 UNLIMITED_UPPER_M = 10_000
+
+# ---- POI (fase 4)
+# Distanza massima (m) tra sentiero e POI per assegnare il badge, per categoria.
+POI_DISTANCE_M = {
+    "lago": 300,
+    "vetta": 150,
+    "malga": 150,
+    "rifugio": 150,
+    "bivacco": 150,
+    "cascata": 150,
+    "panoramico": 150,
+    "passo": 150,
+}
+# Valli con almeno questa estensione (km) diventano etichette "da lontano".
+VALLEY_MAJOR_KM = 8
+
+# ---- DEM e profili (fase 4)
+DEM_ZOOM = 13  # ~6,6 m/pixel in Trentino, vicino ai 5 m del LiDAR sorgente
+PROFILE_STEP_M = 10  # passo di campionamento per il calcolo del dislivello
+GAIN_THRESHOLD_M = 5  # isteresi per il dislivello (vedi dem.gain_loss)
+PROFILE_MAX_POINTS = 300  # punti del profilo salvati per la web app, per sentiero
