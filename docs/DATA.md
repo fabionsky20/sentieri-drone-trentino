@@ -7,9 +7,11 @@ Ispezione del 2026-10-15. Report ripetibile con:
 
 | File | Contenuto | Uso |
 |---|---|---|
-| `sentierisat.shp.zip` → `sat_shp/sentieri_tratte.*` | Sentieri SAT, shapefile | **fonte principale** |
+| `sentierisat.shp.zip` (contiene `sentieri_tratte.*`) | Sentieri SAT, shapefile | **fonte principale** |
 | `sentierisat.gpx.zip`, `sentierisat.kml.zip` | Stessi sentieri in GPX/KML, stessi attributi, nessuna quota | ignorati (ridondanti) |
-| `dflight_geozones_20261015_191610.json.gz` → `dflight/dflight_geozones_20261015.json` | Zone geografiche UAS di tutta Italia, ED-269 | **fonte principale** |
+| `dflight_geozones_20261015_191610.json.gz` | Zone geografiche UAS di tutta Italia, ED-269 | **fonte principale** |
+
+La pipeline legge direttamente zip e gz, non serve estrarli. Se ci sono più file usa il più recente.
 
 Licenza SAT: **ODbL 1.0** (database) + DbCL (contenuti). Uso interno ok; se un giorno si
 pubblica, serve l'attribuzione "Sentieri SAT" e la condivisione dei dati derivati con la stessa licenza.
@@ -138,6 +140,45 @@ Adamello Brenta, Paneveggio–Pale di S. Martino, Stelvio settore trentino, rise
 
 Bonus: i poligoni `LIPROT…` dei parchi possono alimentare direttamente il layer parchi
 (funzionalità 8) senza una fonte esterna.
+
+## 4. Output della pipeline (`data/processed/`)
+
+Generati da `.venv\Scripts\python -m pipeline.build` e verificati da `-m pipeline.verify`.
+Coordinate WGS84 a 5 decimali (~1 m); geometrie semplificate a 2 m.
+
+**`segments.geojson`**: un `LineString` per tratto omogeneo (stesso insieme di zone).
+| Proprietà | Significato |
+|---|---|
+| `id` | `<sentiero_id>#<n>`, n crescente lungo il sentiero |
+| `sentiero_id`, `numero` | id univoco (con varianti `-b`) e numero SAT |
+| `colore` | `verde` / `giallo` / `rosso`, solo zone **permanenti** |
+| `tipo_rosso` | `vietato` (NFZ) / `autorizzazione` (ATM09 da 0 m) / null |
+| `quota_max_m` | quota libera AGL per i gialli (25/45/60), null altrimenti |
+| `zone` | id delle zone permanenti che coprono il tratto, separati da virgola |
+| `zone_temporanee` | id delle NOTAM che coprono il tratto: l'app le applica in base alla data |
+| `lunghezza_m` | lunghezza del tratto |
+
+Le liste sono stringhe separate da virgola perché MapLibre non gestisce bene gli array nelle proprietà.
+
+**`zones.geojson`**: un poligono per parte di zona, nell'area dei sentieri + 5 km, NOTAM già scaduti esclusi.
+Contiene: `zona_id`, `nome`, `categoria` (ATM09/NFZ), `restrizione`, `motivi`, `messaggio`
+(HTML), `permanente`, `inizio`/`fine`, `quota_min_m`, `quota_sup_m` (null = illimitato),
+`colore`/`tipo_rosso`/`quota_max_m` della singola zona, `ente*` (null se "N.A."), `sui_sentieri`.
+
+**`trails.json`**: array, uno per sentiero. Contiene gli attributi SAT rinominati in italiano
+leggibile, `titolo` (nome oppure "partenza → arrivo"), `comuni` come lista, `km_verde`/`km_giallo`/`km_rosso`,
+`zone_temporanee`, `bbox` [ovest, sud, est, nord].
+
+**`meta.json`**: snapshot D-Flight, file sorgente, conteggi, km per colore.
+
+**`data/authorities.yaml`**: scheletro dei contatti, una voce per nome di zona permanente
+sui sentieri (58 voci). Da compilare a mano; la build aggiunge solo le voci nuove.
+
+Note sul risultato della fase 1:
+- I tratti rossi consecutivi possono restare separati se cambiano le zone sottostanti
+  (es. elisuperficie e poi parco): stesso colore, informazioni diverse al click.
+- Sul bordo di una zona, un sentiero che la sfiora può generare tratti di pochi metri
+  (es. `E594`, 3 m nella NFZ Sciliar). Sono reali secondo i poligoni D-Flight e vengono tenuti per prudenza.
 
 ## Dati mancanti, riassunto
 

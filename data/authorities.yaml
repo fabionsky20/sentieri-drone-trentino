@@ -1,0 +1,584 @@
+# Contatti degli enti per le zone D-Flight permanenti che toccano i sentieri SAT.
+# D-Flight riporta "N.A." per tutte queste zone: i contatti vanno compilati a mano.
+#
+# Chiave = nome della zona D-Flight (le zone con più anelli, es. le elisuperfici,
+# condividono lo stesso nome). `zone_id` e `descrizione` sono generati dalla pipeline;
+# gli altri campi sono da compilare. Le zone temporanee (NOTAM) non sono incluse.
+# La pipeline aggiunge le zone nuove senza toccare quelle già presenti.
+# Commenti scritti a mano in questo file vengono persi: usa il campo `note`.
+
+zone:
+  ENV002O-PN Sciliar-Catinaccio:
+    descrizione: NFZ · vietato
+    zone_id:
+    - T015364
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIDT_TRENTO ATZ:
+    descrizione: ATM09 · libero fino a 60 m
+    zone_id:
+    - A560924
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIDT_TRENTO/MATTARELLO 18/36:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A561305
+    - A561632
+    - A561959
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIF17MME_PASSO DEL TONALE( NW TRENTO ):
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564525
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPB_BOLZANO 01GLD/19GLD:
+    descrizione: ATM09 · libero fino a 45 m
+    zone_id:
+    - A561731
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPB_BOLZANO ATZ:
+    descrizione: ATM09 · libero fino a 60 m
+    zone_id:
+    - A560852
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT017_PARCO NAZIONALE DELLO STELVIO (SETTORE TRENTINO):
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564191
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT018_BIOTOPO PALU TREMOLE:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564022
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT020_PARCO NATURALE PROVINCIALE ADAMELLO BRENTA:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564150
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT022_PARCO NATURALE PROVINCIALE PANEVEGGIO PALE S.MARTINO E BIOTI:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564151
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT025_BIOTOPO PRATI DI MONTE:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564025
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT026_BIOTOPO LAGABRUN:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564001
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT030_BIOTOPO FOCI DELL'AVISIO:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A563997
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT031_BIOTOPO LE GRAVE, MONTE BARCO:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564011
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT035_BIOTOPO LAGO TOBLINO:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564008
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT041_RISERVA NATURALE INTEGRALE TRE CIME DI MONTE BONDONE:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564218
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT043_BIOTOPO TORBIERA DI FLAVE:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564030
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT045_BIOTOPO LOMASONA:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564012
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT046_RISERVA NATURALE GUIDATA DI SCANNUPPIA:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564217
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT047_BIOTOPO PRA DELL'ALBI - CEI:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564024
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT056_RISERVA NATURALE GUIDATA DI CORNA PIANA DI BRENTONICO:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564216
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT057_RISERVA NATURALE GUIDATA DI CAMPOBRUN:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564215
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT059_BIOTOPO I MUGHI:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A563999
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT060_BIOTOPO TORBIERA DELLE VIOTE:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564028
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT065_PARCO NATURALE REGIONALE DELLA LESSINIA:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564157
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT071_PARCO NAZIONALE DELLE DOLOMITI BELLUNESI:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564189
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT087_PARCO REGIONALE DELL' ADAMELLO:
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564197
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPROT096_PARCO NAZIONALE DELLO STELVIO (SETTORE LOMBARDO):
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564190
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  LIPWBRENTO_BRENTONICO (TN):
+    descrizione: ATM09 · autorizzazione da 0 m
+    zone_id:
+    - A564332
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1302_CEMBRA:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562024
+    - A562578
+    - A563132
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1354_OSPEDALE ARCO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562035
+    - A562589
+    - A563143
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1372_FASSA:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562039
+    - A562593
+    - A563147
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1493_FONDO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562076
+    - A562630
+    - A563184
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1512_Ospedale Santa Chiara:
+    descrizione: ATM09 · libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562635
+    - A563189
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1524_OSPEDALE DI CLES:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562086
+    - A562640
+    - A563194
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1810_MALE':
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562145
+    - A562699
+    - A563253
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1841_PRIMIERO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562157
+    - A562711
+    - A563265
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_1842_STORO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562158
+    - A562712
+    - A563266
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_2034_Fiemme:
+    descrizione: ATM09 · libero fino a 45 m
+    zone_id:
+    - A563317
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_2080_OSPEDALE TIONE:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562223
+    - A562777
+    - A563331
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_2111_FAI DELLA PAGANELLA:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562232
+    - A562786
+    - A563340
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_2118_FOLGARIA:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562235
+    - A562789
+    - A563343
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_2119_BORGO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562236
+    - A562790
+    - A563344
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_2132_CAMPIGLIO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562240
+    - A562794
+    - A563348
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_275_MALE':
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562258
+    - A562812
+    - A563366
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_497_PRIMIERO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562268
+    - A562822
+    - A563376
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_498_STORO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562269
+    - A562823
+    - A563377
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_539_FONDO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562275
+    - A562829
+    - A563383
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_6306_BEC DE ROCES:
+    descrizione: ATM09 · libero fino a 45 m
+    zone_id:
+    - A563399
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_6405_ELICAMPIGLIO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562328
+    - A562882
+    - A563436
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_6466_HOTEL CAMINETTO:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562346
+    - A562900
+    - A563454
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_6484_Jeuf de Frea:
+    descrizione: ATM09 · libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562905
+    - A563459
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_6715_VALVERDE:
+    descrizione: ATM09 · libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562991
+    - A563545
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_7020_Malga Cianel:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562487
+    - A563041
+    - A563595
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_747_ARABBA:
+    descrizione: ATM09 · libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A563067
+    - A563621
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_792_OSPEDALE TIONE:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562514
+    - A563068
+    - A563622
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_850_Avio:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562535
+    - A563089
+    - A563643
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''
+  avio_975_CEMBRA:
+    descrizione: ATM09 · autorizzazione da 0 m / libero fino a 25 m / libero fino a 45 m
+    zone_id:
+    - A562538
+    - A563092
+    - A563646
+    ente: ''
+    email: ''
+    telefono: ''
+    sito: ''
+    note: ''

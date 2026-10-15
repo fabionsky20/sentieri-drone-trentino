@@ -75,9 +75,20 @@ docs/            documentazione (DATA.md, ...)
 - Windows, Python 3.14 in `.venv/` (`.venv\Scripts\python`), dipendenze in `requirements.txt` (versioni fissate).
 - Node 24 / npm 11 per `web/`.
 - Ispezione dati grezzi: `.venv\Scripts\python pipeline\inspect_raw.py`.
+- **Build dati (comando unico)**: `.venv\Scripts\python -m pipeline.build`. Legge i file più recenti in `data/raw/` (zip/gz) e scrive `data/processed/` + `data/authorities.yaml`.
+- **Verifica a campione**: `.venv\Scripts\python -m pipeline.verify` (esce con errore se un controllo fallisce).
+- Formato dei file prodotti: `docs/DATA.md` §4.
+
+## Decisioni prese
+
+- Sentieri con lo stesso `numero`: copie identiche scartate (E731); tracciati diversi tenuti come varianti `E396`, `E396-b`.
+- Rosso distinto in `tipo_rosso`: `vietato` (NFZ) vs `autorizzazione` (ATM09). Stesso colore, l'app mostra la differenza.
+- Il colore nei file è calcolato solo sulle zone **permanenti**. Le NOTAM temporanee sono elencate per tratto (`zone_temporanee`) e l'app le applica in base alla data scelta.
+- Contatti degli enti in `data/authorities.yaml` (scheletro generato, compilazione manuale).
+- Verifica sul campo (utente, 2026-10-15): elisuperficie Pozza di Fassa, centro 0 m, anelli 25 m e 45 m, libero oltre ~3,5 km. Regola dei colori confermata.
 
 ## Fasi
 
-- **Fase 0** — setup repo, venv, ispezione dati, `docs/DATA.md`, questo file, primo push.
-- **Fase 1** — incrocio sentieri × zone D-Flight → tratti colorati.
+- **Fase 0** ✅ setup repo, venv, ispezione dati, `docs/DATA.md`, questo file, primo push.
+- **Fase 1** ✅ incrocio sentieri × zone D-Flight → tratti colorati (`pipeline/build.py`).
 - Fasi successive da pianificare (web app base, POI, ricerca, filtri, chiusure, PWA, meteo).

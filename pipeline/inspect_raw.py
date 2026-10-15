@@ -12,6 +12,7 @@ Stampa un report su:
 
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 from collections import Counter, defaultdict
@@ -83,7 +84,8 @@ def walk(obj, path: str, paths: Counter, examples: dict) -> None:
 
 def inspect_json(path: Path) -> None:
     section(f"JSON {path.relative_to(RAW)}  ({path.stat().st_size / 1e6:.1f} MB)")
-    with path.open(encoding="utf-8-sig") as f:
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8-sig") as f:
         data = json.load(f)
 
     paths: Counter = Counter()
@@ -156,12 +158,15 @@ def main() -> int:
     if not RAW.exists() or not any(RAW.rglob("*")):
         print(f"Nessun file in {RAW}")
         return 1
-    for p in sorted(RAW.rglob("*.shp")):
+    shps = [*RAW.rglob("*.shp"), *RAW.rglob("*.shp.zip")]
+    for p in sorted(shps):
         inspect_shapefile(p)
-    for p in sorted([*RAW.rglob("*.json"), *RAW.rglob("*.geojson")]):
+    jsons = [*RAW.rglob("*.json"), *RAW.rglob("*.json.gz"), *RAW.rglob("*.geojson")]
+    for p in sorted(jsons):
         inspect_json(p)
-    others = [p for p in RAW.rglob("*") if p.is_file()
-              and p.suffix.lower() not in {".shp", ".shx", ".dbf", ".prj", ".cpg", ".json", ".geojson", ".qmd", ".sbn", ".sbx", ".xml"}]
+    skip = {".shx", ".dbf", ".prj", ".cpg", ".qmd", ".sbn", ".sbx", ".xml", ".gitkeep"}
+    others = [p for p in RAW.rglob("*") if p.is_file() and p not in shps + jsons
+              and p.suffix.lower() not in skip]
     if others:
         section("ALTRI FILE (non ispezionati)")
         for p in others:
