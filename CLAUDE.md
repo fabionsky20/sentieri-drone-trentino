@@ -67,7 +67,7 @@ docs/            documentazione (DATA.md, ...)
 
 - Calcoli geometrici in un CRS metrico (EPSG:32632 / ETRS89-UTM32N), output in WGS84 (EPSG:4326) per il web.
 - La web app legge solo file statici da `data/processed/` (copiati/serviti da Vite).
-- Deploy: GitHub Pages via GitHub Actions. Repo privato su GitHub.
+- Deploy: GitHub Pages via GitHub Actions. Repo pubblico su GitHub (vedi Fase 2).
 - Aggiornamento dati: file nuovi in `data/raw/` → un comando unico della pipeline → push.
 
 ## Ambiente
@@ -101,5 +101,8 @@ docs/            documentazione (DATA.md, ...)
 
 - **Fase 0** ✅ setup repo, venv, ispezione dati, `docs/DATA.md`, questo file, primo push.
 - **Fase 1** ✅ incrocio sentieri × zone D-Flight → tratti colorati (`pipeline/build.py`).
-- **Fase 2** ✅ web app base: mappa, tratti colorati, zone, pannelli, data NOTAM, CI. Hosting da decidere (Pages non disponibile su repo privato con piano Free).
+- **Fase 2** ✅ web app base: mappa, tratti colorati, zone, pannelli, data NOTAM, CI.
+  Hosting: repo reso **pubblico** (scelta dell'utente, 2026-10-15) perché Pages non è disponibile su repo privati col piano Free.
+  Sito: https://fabionsky20.github.io/sentieri-drone-trentino/ (deploy automatico a ogni push su main, variabile `DEPLOY_PAGES=true`).
+  Niente segreti nel repo: non aggiungere mai token o dati personali.
 - Fasi successive da pianificare (POI, ricerca, filtri, chiusure, PWA, meteo).
