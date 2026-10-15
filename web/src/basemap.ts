@@ -9,7 +9,7 @@ import type { ExpressionSpecification, LayerSpecification, Map, StyleSpecificati
 
 export type Basemap = 'pulita' | 'topo'
 
-const FONT = {
+export const FONT = {
   regular: ['Noto Sans Regular'],
   bold: ['Noto Sans Bold'],
   italic: ['Noto Sans Italic'],
@@ -340,66 +340,13 @@ export const style: StyleSpecification = {
   layers: [...topo, ...clean],
 }
 
+/** Layer aggiunti dopo (es. etichette delle valli) da mostrare solo con uno sfondo. */
+export function attachToBasemap(which: Basemap, ids: string[]): void {
+  LAYERS[which].push(...ids)
+}
+
 export function setBasemap(map: Map, which: Basemap): void {
   for (const [name, ids] of Object.entries(LAYERS)) {
     for (const id of ids) map.setLayoutProperty(id, 'visibility', name === which ? 'visible' : 'none')
   }
-}
-
-// ---------------------------------------------------------------- icone
-
-/** Icone disegnate al volo (niente sprite esterni): vetta, passo, rifugio. */
-export function registerIcons(map: Map): void {
-  const draw: Record<string, (c: CanvasRenderingContext2D, s: number) => void> = {
-    peak: (c, s) => {
-      c.fillStyle = '#7a5230'
-      c.strokeStyle = '#ffffff'
-      c.lineWidth = s * 0.12
-      c.beginPath()
-      c.moveTo(s / 2, s * 0.12)
-      c.lineTo(s * 0.9, s * 0.85)
-      c.lineTo(s * 0.1, s * 0.85)
-      c.closePath()
-      c.stroke()
-      c.fill()
-    },
-    pass: (c, s) => {
-      c.strokeStyle = '#7a5230'
-      c.lineWidth = s * 0.14
-      c.lineCap = 'round'
-      c.beginPath()
-      c.arc(s * 0.1, s / 2, s * 0.35, -Math.PI / 3, Math.PI / 3)
-      c.stroke()
-      c.beginPath()
-      c.arc(s * 0.9, s / 2, s * 0.35, (2 * Math.PI) / 3, (4 * Math.PI) / 3)
-      c.stroke()
-    },
-    hut: (c, s) => {
-      c.fillStyle = '#b5401c'
-      c.strokeStyle = '#ffffff'
-      c.lineWidth = s * 0.1
-      c.beginPath()
-      c.moveTo(s / 2, s * 0.08)
-      c.lineTo(s * 0.92, s * 0.48)
-      c.lineTo(s * 0.8, s * 0.48)
-      c.lineTo(s * 0.8, s * 0.9)
-      c.lineTo(s * 0.2, s * 0.9)
-      c.lineTo(s * 0.2, s * 0.48)
-      c.lineTo(s * 0.08, s * 0.48)
-      c.closePath()
-      c.stroke()
-      c.fill()
-    },
-  }
-  const ratio = 2
-  const size = 14 * ratio
-  map.on('styleimagemissing', (e) => {
-    const paint = draw[e.id]
-    if (!paint || map.hasImage(e.id)) return
-    const canvas = document.createElement('canvas')
-    canvas.width = canvas.height = size
-    const ctx = canvas.getContext('2d')!
-    paint(ctx, size)
-    map.addImage(e.id, ctx.getImageData(0, 0, size, size), { pixelRatio: ratio })
-  })
 }
