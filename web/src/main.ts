@@ -1,10 +1,11 @@
 import * as maplibregl from 'maplibre-gl'
-import type { GeoJSONSource, MapGeoJSONFeature, StyleSpecification } from 'maplibre-gl'
+import type { GeoJSONSource, MapGeoJSONFeature } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 // MapLibre 6 esegue i calcoli in un worker separato: Vite lo impacchetta e ne dà l'URL.
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import './style.css'
 
+import { FIRST_LABEL, LABEL_FONT, registerIcons, setBasemap, style, type Basemap } from './basemap'
 import { effective, isActive, today, type Effective } from './flight'
 import { formatDate, renderSegment, renderZones } from './panel'
 import type { Colore, FC, Meta, SegmentProps, Trail, ZoneProps } from './types'
@@ -20,23 +21,6 @@ if (mobile()) $('legend').removeAttribute('open')
 
 // ---------------------------------------------------------------- mappa base
 
-const style: StyleSpecification = {
-  version: 8,
-  // Font per le etichette (quote sui tratti gialli), senza chiavi API.
-  glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
-  sources: {
-    topo: {
-      type: 'raster',
-      tiles: ['a', 'b', 'c'].map((s) => `https://${s}.tile.opentopomap.org/{z}/{x}/{y}.png`),
-      tileSize: 256,
-      maxzoom: 17,
-      attribution:
-        'Mappa © <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA), dati © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · Sentieri © SAT (ODbL) · Zone UAS © D-Flight',
-    },
-  },
-  layers: [{ id: 'topo', type: 'raster', source: 'topo' }],
-}
-
 maplibregl.setWorkerUrl(workerUrl)
 
 const map = new maplibregl.Map({
@@ -47,12 +31,61 @@ const map = new maplibregl.Map({
   hash: true, // posizione nell'URL: si può salvare o condividere un punto
   attributionControl: { compact: true },
 })
+registerIcons(map)
 map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right')
 map.addControl(
   new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }),
   'top-right',
 )
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right')
+
+/** Pulsanti "Pulita / Topo" sulla mappa; la scelta resta salvata nel browser. */
+class BasemapControl implements maplibregl.IControl {
+  private el = document.createElement('div')
+  onAdd(m: maplibregl.Map): HTMLElement {
+    this.el.className = 'maplibregl-ctrl maplibregl-ctrl-group basemap-switch'
+    this.el.setAttribute('role', 'group')
+    this.el.setAttribute('aria-label', 'Sfondo della mappa')
+    const options: [Basemap, string][] = [
+      ['pulita', 'Pulita'],
+      ['topo', 'Topo'],
+    ]
+    const buttons = options.map(([value, label]) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.textContent = label
+      b.title = value === 'pulita' ? 'Mappa pulita con rilievo' : 'Mappa topografica (OpenTopoMap)'
+      b.addEventListener('click', () => apply(value))
+      return [value, b] as const
+    })
+    const apply = (value: Basemap) => {
+      setBasemap(m, value)
+      for (const [v, b] of buttons) b.setAttribute('aria-pressed', String(v === value))
+      try {
+        localStorage.setItem(BASEMAP_KEY, value)
+      } catch {
+        // archiviazione non disponibile: la scelta vale solo per questa visita
+      }
+    }
+    this.el.append(...buttons.map(([, b]) => b))
+    apply(savedBasemap())
+    return this.el
+  }
+  onRemove(): void {
+    this.el.remove()
+  }
+}
+
+const BASEMAP_KEY = 'sfondo'
+function savedBasemap(): Basemap {
+  try {
+    const v = localStorage.getItem(BASEMAP_KEY)
+    if (v === 'pulita' || v === 'topo') return v
+  } catch {
+    // archiviazione non disponibile
+  }
+  return 'pulita'
+}
 
 // ---------------------------------------------------------------- dati
 
@@ -88,66 +121,108 @@ let selection: Selection = null
 
 // ---------------------------------------------------------------- layer
 
+map.addControl(new BasemapControl(), 'top-right')
 map.addSource('zones', { type: 'geojson', data: zonesFC })
-map.addSource('segments', { type: 'geojson', data: segments, promoteId: 'id' })
+map.addSource('segments', {
+  type: 'geojson',
+  data: segments,
+  promoteId: 'id',
+  attribution: 'Sentieri © SAT (ODbL) · Zone UAS © D-Flight',
+})
 
 const colorExpr = (prop: string) =>
   ['match', ['get', prop], 'verde', COLORS.verde, 'giallo', COLORS.giallo, COLORS.rosso] as unknown as string
+const byZoom = (...stops: number[]) => ['interpolate', ['linear'], ['zoom'], ...stops] as unknown as number
 
+// Zone e linee dei sentieri stanno sotto le etichette dello sfondo (FIRST_LABEL),
+// così nomi di paesi e vette restano leggibili.
 const zonesLayout = { visibility: 'none' as const }
-map.addLayer({
-  id: 'zone-fill',
-  type: 'fill',
-  source: 'zones',
-  layout: zonesLayout,
-  filter: ['==', ['get', 'attiva'], true],
-  paint: { 'fill-color': colorExpr('colore'), 'fill-opacity': 0.12 },
-})
-map.addLayer({
-  id: 'zone-line',
-  type: 'line',
-  source: 'zones',
-  layout: zonesLayout,
-  filter: ['==', ['get', 'attiva'], true],
-  paint: {
-    'line-color': colorExpr('colore'),
-    'line-width': 1.2,
-    'line-opacity': 0.8,
-    'line-dasharray': ['case', ['==', ['get', 'tipo_rosso'], 'vietato'], ['literal', [1, 0]], ['literal', [3, 2]]],
+map.addLayer(
+  {
+    id: 'zone-fill',
+    type: 'fill',
+    source: 'zones',
+    layout: zonesLayout,
+    filter: ['==', ['get', 'attiva'], true],
+    paint: { 'fill-color': colorExpr('colore'), 'fill-opacity': 0.12 },
   },
-})
-map.addLayer({
-  id: 'zone-sel',
-  type: 'line',
-  source: 'zones',
-  filter: ['in', ['get', 'zona_id'], ['literal', []]],
-  paint: { 'line-color': '#1d4ed8', 'line-width': 3 },
-})
+  FIRST_LABEL,
+)
+map.addLayer(
+  {
+    id: 'zone-line',
+    type: 'line',
+    source: 'zones',
+    layout: zonesLayout,
+    filter: ['==', ['get', 'attiva'], true],
+    paint: {
+      'line-color': colorExpr('colore'),
+      'line-width': 1.2,
+      'line-opacity': 0.8,
+      'line-dasharray': ['case', ['==', ['get', 'tipo_rosso'], 'vietato'], ['literal', [1, 0]], ['literal', [3, 2]]],
+    },
+  },
+  FIRST_LABEL,
+)
+map.addLayer(
+  {
+    id: 'zone-sel',
+    type: 'line',
+    source: 'zones',
+    filter: ['in', ['get', 'zona_id'], ['literal', []]],
+    paint: { 'line-color': '#1d4ed8', 'line-width': 3 },
+  },
+  FIRST_LABEL,
+)
 
-const lineWidth = ['interpolate', ['linear'], ['zoom'], 8, 1.5, 12, 3, 15, 5] as unknown as number
-map.addLayer({
-  id: 'seg-sel',
-  type: 'line',
-  source: 'segments',
-  filter: ['==', ['get', 'sentiero_id'], ''],
-  layout: { 'line-cap': 'round', 'line-join': 'round' },
-  paint: { 'line-color': '#1d4ed8', 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 6, 15, 12] },
-})
-map.addLayer({
-  id: 'seg-casing',
-  type: 'line',
-  source: 'segments',
-  minzoom: 11,
-  layout: { 'line-cap': 'round', 'line-join': 'round' },
-  paint: { 'line-color': '#ffffff', 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 4, 15, 8], 'line-opacity': 0.9 },
-})
-map.addLayer({
-  id: 'seg-line',
-  type: 'line',
-  source: 'segments',
-  layout: { 'line-cap': 'round', 'line-join': 'round' },
-  paint: { 'line-color': colorExpr('c'), 'line-width': lineWidth },
-})
+// Sentieri: ombra scura sfumata + bordo chiaro + colore, per staccarli da qualsiasi sfondo.
+// Sottili da lontano (la rete è fitta), spessi da vicino. Bordo e ombra crescono con lo zoom.
+const ZOOMS = [8, 10, 12, 14, 17]
+const LINE_W = [1.5, 2.1, 3.2, 4.6, 7]
+const widths = (extra: number[] = [0, 0, 0, 0, 0]) => ZOOMS.flatMap((z, i) => [z, LINE_W[i] + extra[i]])
+const round = { 'line-cap': 'round', 'line-join': 'round' } as const
+map.addLayer(
+  {
+    id: 'seg-sel',
+    type: 'line',
+    source: 'segments',
+    filter: ['==', ['get', 'sentiero_id'], ''],
+    layout: round,
+    paint: { 'line-color': '#1d4ed8', 'line-width': byZoom(...widths([4, 5, 7, 8, 9])) },
+  },
+  FIRST_LABEL,
+)
+map.addLayer(
+  {
+    id: 'seg-shadow',
+    type: 'line',
+    source: 'segments',
+    layout: round,
+    paint: { 'line-color': '#000000', 'line-opacity': 0.28, 'line-width': byZoom(...widths([1.5, 2.5, 4, 5, 6])), 'line-blur': 2 },
+  },
+  FIRST_LABEL,
+)
+map.addLayer(
+  {
+    id: 'seg-casing',
+    type: 'line',
+    source: 'segments',
+    layout: round,
+    paint: { 'line-color': '#ffffff', 'line-width': byZoom(...widths([1, 1.6, 2.4, 2.8, 3.2])) },
+  },
+  FIRST_LABEL,
+)
+map.addLayer(
+  {
+    id: 'seg-line',
+    type: 'line',
+    source: 'segments',
+    layout: round,
+    paint: { 'line-color': colorExpr('c'), 'line-width': byZoom(...widths()) },
+  },
+  FIRST_LABEL,
+)
+// La quota dei tratti gialli sta sopra tutto: è l'informazione più importante.
 map.addLayer({
   id: 'seg-label',
   type: 'symbol',
@@ -158,11 +233,11 @@ map.addLayer({
     'symbol-placement': 'line',
     'symbol-spacing': 250,
     'text-field': ['concat', '≤ ', ['to-string', ['get', 'q']], ' m'],
-    'text-font': ['Noto Sans Medium'],
+    'text-font': LABEL_FONT,
     'text-size': 12,
-    'text-offset': [0, -1],
+    'text-offset': [0, -1.1],
   },
-  paint: { 'text-color': '#6b4e00', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
+  paint: { 'text-color': '#6b4e00', 'text-halo-color': '#ffffff', 'text-halo-width': 1.8 },
 })
 // Linea invisibile larga per toccare facilmente i sentieri col dito.
 map.addLayer({

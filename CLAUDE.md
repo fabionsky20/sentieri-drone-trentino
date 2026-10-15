@@ -84,7 +84,10 @@ docs/            documentazione (DATA.md, ...)
 ## Web app (fase 2)
 
 - `web/src/main.ts`: mappa, layer, click, data scelta. `flight.ts`: regola dei colori per data (stessa logica di `pipeline/dflight.py`, da tenere allineate). `panel.ts`: contenuto del pannello (solo `textContent`, nessun HTML dei dati interpretato).
-- Sfondo: OpenTopoMap (raster, max zoom 17, senza chiave). Font delle etichette: `protomaps.github.io/basemaps-assets` (Noto Sans).
+- Sfondi in `web/src/basemap.ts` (fase 3), selettore "Pulita / Topo" sulla mappa, scelta salvata nel browser:
+  - **pulita** (default): stile scritto da zero su tile vettoriali OpenFreeMap (schema OpenMapTiles) + rilievo da Mapterhorn (terrarium). Niente path/track OSM; etichette graduali per zoom (città → paesi → vette/laghi/rifugi/passi). Icone disegnate al volo, nessuno sprite esterno. Lo schema non contiene i nomi delle valli.
+  - **topo**: OpenTopoMap raster (max zoom 17), leggermente desaturato.
+  - Font: `tiles.openfreemap.org/fonts` (Noto Sans Regular/Bold/Italic). I layer dei sentieri vanno inseriti prima di `FIRST_LABEL`.
 - MapLibre 6: il worker va impacchettato da Vite (`?worker&url` + `setWorkerUrl`), altrimenti la mappa resta vuota.
 - `base: './'` in Vite: la stessa build funziona sotto `/nome-repo/` (Pages) o alla radice di un dominio.
 - Data scelta: un NOTAM è attivo se la sua validità si sovrappone anche in parte al giorno locale scelto.
@@ -105,4 +108,5 @@ docs/            documentazione (DATA.md, ...)
   Hosting: repo reso **pubblico** (scelta dell'utente, 2026-10-15) perché Pages non è disponibile su repo privati col piano Free.
   Sito: https://fabionsky20.github.io/sentieri-drone-trentino/ (deploy automatico a ogni push su main, variabile `DEPLOY_PAGES=true`).
   Niente segreti nel repo: non aggiungere mai token o dati personali.
+- **Fase 3** ✅ mappa pulita: sfondo vettoriale + rilievo, selettore sfondo, tratti con ombra e bordo chiaro.
 - Fasi successive da pianificare (POI, ricerca, filtri, chiusure, PWA, meteo).
