@@ -64,6 +64,52 @@ export interface Trail {
   km_rosso: number
   zone_temporanee: string[]
   bbox: [number, number, number, number]
+  // Fase 4
+  poi: TrailPoi[]
+  badge: PoiCategory[]
+  dislivello_pos?: number
+  dislivello_neg?: number
+  quota_min_dem?: number
+  quota_max_dem?: number
+}
+
+export type PoiCategory = 'lago' | 'vetta' | 'malga' | 'rifugio' | 'bivacco' | 'cascata' | 'panoramico' | 'passo'
+
+/** POI vicino a un sentiero: distanza dal sentiero (m) e posizione lungo il percorso (km). */
+export interface TrailPoi {
+  id: string
+  d: number
+  km: number
+}
+
+export interface PoiProps {
+  id: string
+  categoria: PoiCategory
+  nome: string
+  ele: number | null
+  osm: string
+}
+
+export interface ValleyProps {
+  nome: string
+  km: number
+  principale: boolean
+}
+
+/** Profilo ridotto: quote ogni `passo` metri, ultimo punto a `lung`. */
+export interface Profile {
+  passo: number
+  lung: number
+  q: number[]
+}
+
+export interface SearchItem {
+  t: string // tipo: sentiero, paese, valle o categoria POI
+  n: string // nome mostrato
+  k: string // chiave normalizzata
+  c: [number, number]
+  id?: string
+  b?: [number, number, number, number]
 }
 
 export interface Meta {
@@ -71,6 +117,8 @@ export interface Meta {
   snapshot: string | null // ora italiana, senza fuso
   sentieri: number
   tratti: number
+  osm_scaricato?: string | null
+  quote?: string
 }
 
 export type FC<P> = GeoJSON.FeatureCollection<GeoJSON.Geometry, P>

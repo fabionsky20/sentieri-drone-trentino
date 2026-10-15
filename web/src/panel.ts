@@ -2,7 +2,8 @@
 // Tutto il testo passa da textContent: nessun HTML dei dati viene interpretato.
 
 import { split, type Effective } from './flight'
-import type { Restriction, SegmentProps, Trail, ZoneProps } from './types'
+import { CATEGORIES, iconDataUrl } from './icons'
+import type { PoiCategory, PoiProps, Restriction, SegmentProps, Trail, ZoneProps } from './types'
 
 type Child = Node | string | null | undefined | false
 
@@ -35,7 +36,9 @@ const MOTIVI: Record<string, string> = {
 }
 
 const km = (m: number | null | undefined) => (m == null ? '–' : `${(m / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })} km`)
-const kmVal = (v: number) => `${v.toLocaleString('it-IT', { maximumFractionDigits: 1 })} km`
+/** Numero di km formattato ("2,9"); kmVal aggiunge l'unità ("2,9 km"). */
+export const kmNum = (v: number) => v.toLocaleString('it-IT', { maximumFractionDigits: 1 })
+export const kmVal = (v: number) => `${kmNum(v)} km`
 
 const dateFmt = new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 export const formatDate = (iso: string) => dateFmt.format(new Date(iso))
@@ -68,30 +71,30 @@ function kmBar(k: { verde: number; giallo: number; rosso: number }): HTMLElement
   return h('div', {}, bar, legend)
 }
 
-export interface SegmentView {
-  seg: SegmentProps
-  eff: Effective
+export interface TrailView {
   trail: Trail
+  /** Il tratto toccato sulla mappa (assente se il sentiero arriva da filtri o ricerca). */
+  segment?: { seg: SegmentProps; eff: Effective }
   trailKm: { verde: number; giallo: number; rosso: number }
   zones: Map<string, ZoneProps>
+  pois: Map<string, PoiProps>
+  profile: HTMLElement // contenitore del profilo, riempito da chi chiama
+  photos: HTMLElement // contenitore delle foto, riempito da chi chiama
   onZone: (ids: string[]) => void
+  onPoi: (id: string) => void
   onFit: () => void
 }
 
-export function renderSegment(v: SegmentView): HTMLElement {
-  const { seg, eff, trail } = v
+/** Icona di categoria come <img> (stessa grafica della mappa). */
+export function catIcon(cat: PoiCategory, size = 16): HTMLElement {
+  return h('img', { src: iconDataUrl(`poi-${cat}`, size), width: String(size), height: String(size), alt: '', class: 'caticon' })
+}
+
+function segmentSection(v: TrailView): HTMLElement | null {
+  if (!v.segment) return null
+  const { seg, eff } = v.segment
   const zoneIds = [...split(seg.zone), ...eff.notam]
   const zoneNames = [...new Set(zoneIds.map((id) => v.zones.get(id)?.nome ?? id))]
-
-  const diff = trail.difficolta
-  const tempi = [trail.tempo_andata && `andata ${trail.tempo_andata}`, trail.tempo_ritorno && `ritorno ${trail.tempo_ritorno}`]
-    .filter(Boolean)
-    .join(' · ')
-  const quote = trail.quota_min != null ? `${trail.quota_min} – ${trail.quota_max} m` : null
-
-  const fit = h('button', { type: 'button', class: 'link' }, 'Centra il sentiero')
-  fit.addEventListener('click', v.onFit)
-
   const section = h(
     'section',
     { class: 'tratto' },
@@ -111,6 +114,46 @@ export function renderSegment(v: SegmentView): HTMLElement {
     btn.addEventListener('click', () => v.onZone(zoneIds))
     section.append(btn)
   }
+  return section
+}
+
+/** Badge riassuntivi: una icona per categoria presente lungo il sentiero. */
+export function badgeRow(cats: PoiCategory[]): HTMLElement {
+  const wrap = h('div', { class: 'badges' })
+  for (const c of cats) wrap.append(h('span', { class: 'chip' }, catIcon(c, 14), CATEGORIES[c].label))
+  return wrap
+}
+
+function poiList(v: TrailView): HTMLElement | null {
+  const items = v.trail.poi.map((p) => ({ ...p, info: v.pois.get(p.id) })).filter((p) => p.info)
+  if (!items.length) return null
+  const list = h('ul', { class: 'poilist' })
+  for (const p of items) {
+    const btn = h(
+      'button',
+      { type: 'button' },
+      catIcon(p.info!.categoria),
+      h('span', { class: 'poiname' }, p.info!.nome + (p.info!.ele ? ` (${p.info!.ele} m)` : '')),
+      h('span', { class: 'poimeta' }, `al km ${kmNum(p.km)} · a ${p.d} m`),
+    )
+    btn.addEventListener('click', () => v.onPoi(p.id))
+    list.append(h('li', {}, btn))
+  }
+  return h('div', {}, h('h3', {}, `Lungo il percorso (${items.length})`), list)
+}
+
+export function renderTrail(v: TrailView): HTMLElement {
+  const { trail } = v
+  const diff = trail.difficolta
+  const tempi = [trail.tempo_andata && `andata ${trail.tempo_andata}`, trail.tempo_ritorno && `ritorno ${trail.tempo_ritorno}`]
+    .filter(Boolean)
+    .join(' · ')
+  const quote = trail.quota_min != null ? `${trail.quota_min} – ${trail.quota_max} m` : null
+  const disl =
+    trail.dislivello_pos != null ? `+${trail.dislivello_pos} m / −${trail.dislivello_neg} m` : null
+
+  const fit = h('button', { type: 'button', class: 'link' }, 'Centra il sentiero')
+  fit.addEventListener('click', v.onFit)
 
   return h(
     'div',
@@ -118,20 +161,68 @@ export function renderSegment(v: SegmentView): HTMLElement {
     h('p', { class: 'kicker' }, `Sentiero ${trail.numero}`),
     h('h2', {}, trail.titolo),
     trail.nome ? h('p', { class: 'sub' }, `${trail.loc_inizio} → ${trail.loc_fine}`) : null,
-    section,
+    trail.badge.length ? badgeRow(trail.badge) : null,
+    segmentSection(v),
     h(
       'dl',
       {},
       row('Difficoltà', diff ? `${diff} · ${DIFFICOLTA[diff] ?? ''}` : null),
       row('Lunghezza', km(trail.lunghezza_m)),
+      row('Dislivello', disl),
       row('Tempi', tempi),
       row('Quote', quote),
       row('Gruppo', trail.gruppo_montuoso),
     ),
     h('h3', {}, 'Volo lungo il sentiero'),
     kmBar(v.trailKm),
+    h('h3', {}, 'Profilo altimetrico'),
+    v.profile,
     fit,
+    poiList(v),
+    v.photos,
   )
+}
+
+export interface PoiView {
+  poi: PoiProps
+  near: { trail: Trail; d: number; km: number }[]
+  photos: HTMLElement
+  onTrail: (id: string) => void
+  onBack?: () => void
+}
+
+export function renderPoi(v: PoiView): HTMLElement {
+  const { poi } = v
+  const root = h('div', {})
+  if (v.onBack) {
+    const back = h('button', { type: 'button', class: 'link back' }, '← Torna al sentiero')
+    back.addEventListener('click', v.onBack)
+    root.append(back)
+  }
+  root.append(
+    h('p', { class: 'kicker' }, catIcon(poi.categoria, 14), ` ${CATEGORIES[poi.categoria].label}`),
+    h('h2', {}, poi.nome),
+  )
+  if (poi.ele) root.append(h('p', { class: 'sub' }, `${poi.ele} m`))
+  if (v.near.length) {
+    const list = h('ul', { class: 'poilist' })
+    for (const n of v.near) {
+      const btn = h(
+        'button',
+        { type: 'button' },
+        h('span', { class: 'poiname' }, `${n.trail.numero} · ${n.trail.titolo}`),
+        h('span', { class: 'poimeta' }, `a ${n.d} m, al km ${kmNum(n.km)}`),
+      )
+      btn.addEventListener('click', () => v.onTrail(n.trail.id))
+      list.append(h('li', {}, btn))
+    }
+    root.append(h('h3', {}, `Sentieri vicini (${v.near.length})`), list)
+  } else {
+    root.append(h('p', { class: 'muted' }, 'Nessun sentiero SAT entro la distanza dei badge.'))
+  }
+  const osmUrl = `https://www.openstreetmap.org/${({ n: 'node', w: 'way', r: 'relation' } as Record<string, string>)[poi.osm[0]]}/${poi.osm.slice(1)}`
+  root.append(h('p', { class: 'small' }, h('a', { href: osmUrl, target: '_blank', rel: 'noopener' }, 'Vedi su OpenStreetMap')), v.photos)
+  return root
 }
 
 function validity(z: ZoneProps): string {
