@@ -75,7 +75,9 @@ docs/            documentazione (DATA.md, ...)
 - Windows, Python 3.14 in `.venv/` (`.venv\Scripts\python`), dipendenze in `requirements.txt` (versioni fissate).
 - Node 24 / npm 11 per `web/`.
 - Ispezione dati grezzi: `.venv\Scripts\python pipeline\inspect_raw.py`.
-- **Build dati (comando unico)**: `.venv\Scripts\python -m pipeline.build`. Legge i file più recenti in `data/raw/` (zip/gz) e scrive `data/processed/` + `data/authorities.yaml`.
+- **Build dati (comando unico)**: `.venv\Scripts\python -m pipeline.build`. Legge i file più recenti in `data/raw/` (zip/gz) e scrive `data/processed/` + `data/authorities.yaml`. Scarica solo ciò che manca nelle cache (POI OSM in `data/raw/osm/`, tile DEM in `data/raw/dem/`). Opzioni: `--offline`, `--refresh-osm`.
+- POI: Overpass come fonte principale, con piano B automatico sull'estratto regionale OSM France (`pipeline/osm_extract.py`). Mai interrogare Overpass in parallelo o in ciclo stretto.
+- DEM: tile Mapterhorn z13 (in Trentino = LiDAR PAT 5 m). Distanze dei badge per categoria in `pipeline/config.py` (`POI_DISTANCE_M`).
 - **Verifica a campione**: `.venv\Scripts\python -m pipeline.verify` (esce con errore se un controllo fallisce).
 - Formato dei file prodotti: `docs/DATA.md` §4.
 - **Web app** (in `web/`): `npm run dev` (sviluppo, serve anche `data/processed/` su `/data/`), `npm run build` (→ `web/dist/`, con i dati copiati in `dist/data/`).
@@ -91,6 +93,7 @@ docs/            documentazione (DATA.md, ...)
 - MapLibre 6: il worker va impacchettato da Vite (`?worker&url` + `setWorkerUrl`), altrimenti la mappa resta vuota.
 - `base: './'` in Vite: la stessa build funziona sotto `/nome-repo/` (Pages) o alla radice di un dominio.
 - Data scelta: un NOTAM è attivo se la sua validità si sovrappone anche in parte al giorno locale scelto.
+- Fase 4: `icons.ts` (icone su canvas; in MapLibre 6 vanno registrate con `setMissingStyleImageResolver` o subito al `style.load`, l'evento `styleimagemissing` arriva troppo tardi), `trailgeom.ts`, `profile.ts`, `photos.ts` (Wikimedia Commons al momento), `filters.ts` (tutti i filtri in AND; i sentieri esclusi sono attenuati con feature-state `off`), `search.ts`. `profiles.json` e `search.json` si caricano solo al primo uso.
 
 ## Decisioni prese
 
@@ -109,4 +112,5 @@ docs/            documentazione (DATA.md, ...)
   Sito: https://fabionsky20.github.io/sentieri-drone-trentino/ (deploy automatico a ogni push su main, variabile `DEPLOY_PAGES=true`).
   Niente segreti nel repo: non aggiungere mai token o dati personali.
 - **Fase 3** ✅ mappa pulita: sfondo vettoriale + rilievo, selettore sfondo, tratti con ombra e bordo chiaro.
+- **Fase 4** ✅ POI OSM + valli, badge di prossimità, dislivello e profilo dal DEM, filtri, ricerca, foto Wikimedia, icone POI. Dettagli dati in `docs/DATA.md` §5. Il design dell'app si rifà alla fine: per ora lo stile è funzionale.
 - Fasi successive da pianificare (POI, ricerca, filtri, chiusure, PWA, meteo).

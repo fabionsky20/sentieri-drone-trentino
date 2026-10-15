@@ -13,6 +13,13 @@
   <body>
     <header class="bar">
       <span class="brand">Sentieri &amp; Drone</span>
+      <button type="button" id="open-search" class="iconbtn" aria-label="Cerca" title="Cerca">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>
+      </button>
+      <button type="button" id="open-filters" class="iconbtn" aria-label="Filtri" title="Filtri">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z" /></svg>
+        <span id="filter-count" class="count" hidden></span>
+      </button>
       <label class="day">
         <span>Volo il</span>
         <input type="date" id="day" required />
@@ -29,8 +36,29 @@
         <li><i class="sw giallo"></i>Libero fino alla quota indicata</li>
         <li><i class="sw rosso"></i>Vietato o con autorizzazione</li>
       </ul>
+      <p class="legend-title">Punti sulla mappa</p>
+      <div id="poi-toggles" class="poi-toggles"></div>
       <p id="snapshot" class="snapshot"></p>
     </details>
+
+    <div id="search" class="search" hidden>
+      <div class="search-box">
+        <input type="search" id="search-input" placeholder="Sentiero, vetta, lago, rifugio, passo, paese…" autocomplete="off" />
+        <button type="button" id="search-close" class="close" aria-label="Chiudi ricerca">×</button>
+      </div>
+      <ul id="search-results" class="search-results"></ul>
+    </div>
+
+    <aside id="filters" class="filters" hidden>
+      <div class="filters-head">
+        <h2>Filtri</h2>
+        <button type="button" id="filters-reset" class="link">Azzera</button>
+        <button type="button" id="filters-close" class="close" aria-label="Chiudi filtri">×</button>
+      </div>
+      <div id="filters-form"></div>
+      <p id="filters-summary" class="filters-summary"></p>
+      <ul id="filters-results" class="results"></ul>
+    </aside>
 
     <aside id="panel" hidden>
       <button type="button" class="close" id="panel-close" aria-label="Chiudi">×</button>

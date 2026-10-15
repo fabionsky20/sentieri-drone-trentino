@@ -180,9 +180,64 @@ Note sul risultato della fase 1:
 - Sul bordo di una zona, un sentiero che la sfiora può generare tratti di pochi metri
   (es. `E594`, 3 m nella NFZ Sciliar). Sono reali secondo i poligoni D-Flight e vengono tenuti per prudenza.
 
+## 5. POI, valli e quote (fase 4)
+
+### POI e valli da OpenStreetMap (`pipeline/osm.py`)
+
+- **Fonte principale: Overpass API.** Una query per categoria nel riquadro dei sentieri più circa 3 km, in sequenza, con 10 s di pausa tra le query e attese di 30/90/240 s dopo un errore. Cache in `data/raw/osm/<categoria>.json`. La build scarica solo le categorie mancanti; `python -m pipeline.osm --refresh` le riscarica tutte, `--max-age N` solo quelle più vecchie di N giorni.
+- **Piano B automatico: estratto regionale** OSM France `trentino_alto_adige-latest.osm.pbf` (~140 MB, aggiornato ogni giorno), letto in locale con pyosmium (`pipeline/osm_extract.py`). Si usa se Overpass non risponde.
+  - Il 2026-10-15 Overpass era irraggiungibile (overpass-api.de non accettava connessioni, i mirror davano 500/504), quindi **i POI attuali vengono dall'estratto**. Il campo `_fonte` di ogni file di cache dice da dove arriva.
+  - ⚠️ L'estratto copre solo il Trentino-Alto Adige: mancano i POI appena oltre il confine regionale (es. lati veneti di Lessinia, Pasubio, Altopiano di Asiago, Lagorai orientale). Con Overpass funzionante, `--refresh` li recupera.
+
+| Categoria | Regola OSM | Note |
+|---|---|---|
+| lago | `natural=water` con nome, escluso `water=river/canal/stream/…` | distanza calcolata dalla riva |
+| vetta | nodo `natural=peak/volcano` con nome | quota da `ele` |
+| malga | nome che inizia con "Malga/Malghetta/Casera/Malghe ", esclusi strade e corsi d'acqua | in OSM le malghe non hanno un tag univoco: la regola sul nome è l'unica affidabile |
+| rifugio | `tourism=alpine_hut` | |
+| bivacco | `tourism=wilderness_hut`, `amenity=shelter` con nome "Bivacc…" | |
+| cascata | `waterway=waterfall`, `natural=waterfall` | senza nome → "Cascata" |
+| panoramico | `tourism=viewpoint` | senza nome → "Punto panoramico" |
+| passo | nodo `mountain_pass=yes`, oppure `natural=saddle` con nome | |
+| valle | `natural=valley` con nome | linee: "principale" se ≥ 8 km (etichetta da lontano) |
+| paese | nodo `place=city/town/village/hamlet` | solo per la ricerca |
+
+Doppioni (stesso nome entro 200 m, es. rifugio mappato come punto e come edificio): ne resta uno.
+Il 2026-10-15 risultavano 7217 POI (2696 vette, 1212 panoramici, 1010 malghe, 923 passi,
+522 laghi, 314 rifugi, 302 cascate, 238 bivacchi) e 874 valli (40 principali).
+
+### Prossimità (badge)
+
+Un POI è "lungo il sentiero" se la sua forma (riva del lago, edificio, punto) è entro
+`POI_DISTANCE_M` (in `pipeline/config.py`): laghi 300 m, tutto il resto 150 m. In
+`trails.json` ogni sentiero ha `poi: [{id, d, km}]` (distanza in m, posizione lungo il percorso)
+e `badge` (categorie presenti). L'83% dei sentieri ha almeno un badge.
+
+### Quote, dislivello e profilo (`pipeline/dem.py`)
+
+- **DEM: tile Mapterhorn** (terrarium, z13 ≈ 6,6 m/pixel). In Trentino derivano dal **LiDAR della Provincia** (DTM terreno nudo, ricampionato a 5 m, CC BY 2.5), in Alto Adige dal DTM provinciale 2,5 m (CC0), altrove da Copernicus GLO-30. Si scaricano solo le 568 tile che toccano i sentieri (78 MB, cache in `data/raw/dem/`).
+  - Scartati il LiDAR PAT originale (1 m, centinaia di riquadri da scaricare a mano) e Copernicus GLO-30 da solo (30 m, è un modello di superficie: nei boschi misura la cima degli alberi).
+- Campionamento ogni 10 m con interpolazione bilineare, media mobile su 3 punti, dislivello con **isteresi di 5 m**: le oscillazioni sotto soglia non si sommano, come fanno i GPS da escursionismo.
+- **Verifica:** confrontando con le quote dichiarate dalla SAT, lo scarto mediano è 1 m sulla quota massima e 0 m sulla minima, con solo 3 sentieri oltre 50 m. Esempi: E101 D+ 709 m (SAT 1092→1800), E542 D+ 464 m (SAT 2265→2734).
+- `trails.json`: `dislivello_pos`, `dislivello_neg`, `quota_min_dem`, `quota_max_dem`.
+- `profiles.json`: `{id: {passo, lung, q: [quote…]}}`, al massimo 300 punti per sentiero; l'app lo carica alla prima apertura di una scheda.
+
+### Ricerca (`search.json`)
+
+Voci `{t: tipo, n: nome, k: chiave normalizzata, c: [lon, lat], id?, b?: bbox}` per sentieri
+(numero, nome, località, gruppo), POI, valli e paesi. La chiave è minuscola e senza accenti:
+"passo manghen" trova "Passo Manghen" e "PASSO DEL MÀNGHEN".
+
+### Foto
+
+Le foto non sono nella pipeline: l'app le chiede al momento all'API pubblica di Wikimedia
+Commons (ricerca geografica, 1,5 km attorno a 3 punti del sentiero o 400 m attorno al POI),
+e mostra autore e licenza di ciascuna. Servono la connessione e foto geolocalizzate nella
+zona: in alcune valli poco fotografate non c'è nulla.
+
 ## Dati mancanti, riassunto
 
 1. Stato aperto/chiuso dei sentieri → solo `data/closures.yaml`.
-2. Dislivello cumulato e profilo → DEM (es. LiDAR / DTM della Provincia di Trento, o Copernicus 30 m).
+2. ~~Dislivello cumulato e profilo~~ → risolto in fase 4 con il DEM Mapterhorn (LiDAR PAT).
 3. Contatti enti per i permessi → `data/authorities.yaml` manuale.
 4. Nome leggibile per il 64% dei sentieri → nome sintetico da località di partenza e arrivo.
