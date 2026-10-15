@@ -8,11 +8,19 @@ Legge i file più recenti in data/raw/ e scrive in data/processed/:
 - zones.geojson      zone D-Flight dell'area, con tutti i campi utili all'app
 - trails.json        attributi dei sentieri + km per colore + bbox (senza geometria)
 - meta.json          data dello snapshot D-Flight, fonti, statistiche
+- pois.geojson       punti di interesse OSM (laghi, vette, malghe, rifugi, …)
+- valleys.geojson    valli con nome, per le etichette
+- profiles.json      profilo altimetrico ridotto per sentiero
+- search.json        indice per la ricerca testuale
 e aggiorna lo scheletro di data/authorities.yaml.
+
+Scarica da internet solo ciò che manca nelle cache (POI OSM, tile DEM).
+Opzioni: --offline (nessun download), --refresh-osm (riscarica i POI).
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from collections import defaultdict
@@ -22,7 +30,7 @@ import geopandas as gpd
 import shapely
 from shapely.geometry import box
 
-from . import authorities, config, dflight, sat, segments
+from . import authorities, config, dem, dflight, enrich, osm, sat, segments
 
 
 def write_geojson(gdf: gpd.GeoDataFrame, name: str, tolerance: float) -> int:
@@ -47,6 +55,10 @@ def write_json(obj, name: str) -> int:
 
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--offline", action="store_true", help="non scaricare nulla, usa solo le cache")
+    ap.add_argument("--refresh-osm", action="store_true", help="riscarica i POI da Overpass")
+    args = ap.parse_args()
     config.PROCESSED.mkdir(parents=True, exist_ok=True)
 
     sat_path = sat.find_source()
@@ -90,6 +102,31 @@ def main() -> int:
         row["bbox"] = bounds.loc[i].tolist()
         trail_rows.append(row)
 
+    # ---- POI da OpenStreetMap
+    wgs_bounds = trails.to_crs(config.WEB_CRS).total_bounds + [-0.04, -0.03, 0.04, 0.03]
+    if not args.offline:
+        try:
+            osm.fetch(wgs_bounds, refresh=args.refresh_osm)
+        except RuntimeError as e:
+            print(f"  ATTENZIONE: {e}. Uso la cache disponibile.")
+    pois = osm.pois()
+    valleys = osm.valleys()
+    places = osm.places()
+    near = enrich.nearby_pois(trails, pois)
+    cats = dict(zip(pois.id, pois.categoria))
+    for row in trail_rows:
+        row["poi"] = near.get(row["id"], [])
+        row["badge"] = sorted({cats[p["id"]] for p in row["poi"]})
+    print(f"POI: {len(pois)} ({pois.categoria.value_counts().to_dict() if len(pois) else '-'}), valli: {len(valleys)}")
+
+    # ---- Quote dal DEM
+    if not args.offline:
+        print(f"  tile DEM: {dem.fetch(dem.tiles_for(trails.geometry))}")
+    stats, profs = enrich.profiles(trails)
+    for row in trail_rows:
+        row.update(stats.get(row["id"], {}))
+    print(f"Profili: {len(profs)} sentieri")
+
     used_ids = set(",".join(segs.zone + "," + segs.zone_temporanee).split(",")) - {""}
     zones["sui_sentieri"] = zones.zona_id.isin(used_ids)
 
@@ -97,7 +134,18 @@ def main() -> int:
         "segments.geojson": write_geojson(segs, "segments.geojson", config.SIMPLIFY_TRAILS_M),
         "zones.geojson": write_geojson(zones, "zones.geojson", config.SIMPLIFY_ZONES_M),
         "trails.json": write_json(trail_rows, "trails.json"),
+        "profiles.json": write_json(profs, "profiles.json"),
     }
+    pois_out = pois.drop(columns=["forma"])
+    pois_out["ele"] = pois_out.ele.astype("Int64")
+    sizes["pois.geojson"] = write_geojson(pois_out, "pois.geojson", 0)
+    valleys_out = valleys.assign(principale=valleys.km >= config.VALLEY_MAJOR_KM)
+    sizes["valleys.geojson"] = write_geojson(valleys_out, "valleys.geojson", 30)
+    sizes["search.json"] = write_json(
+        enrich.search_index(trail_rows, pois.to_crs(config.WEB_CRS), valleys.to_crs(config.WEB_CRS),
+                            places.to_crs(config.WEB_CRS) if len(places) else places),
+        "search.json",
+    )
 
     totals = segs.groupby("colore").lunghezza_m.sum().div(1000).round(1).to_dict()
     meta.update({
@@ -107,6 +155,9 @@ def main() -> int:
         "zone_area": int(zones.zona_id.nunique()),
         "zone_sui_sentieri": len({z for z in used_ids}),
         "km_per_colore": totals,
+        "poi": int(len(pois)),
+        "osm_scaricato": osm.downloaded_at(),
+        "quote": dem.ATTRIBUTION,
     })
     sizes["meta.json"] = write_json(meta, "meta.json")
 

@@ -119,7 +119,30 @@ def main() -> int:
         bad += not ok
     check(bad == 0, f"{mixed} tratti coperti da zone di livello diverso, tutti col colore più restrittivo")
 
-    print("\n9. Totali")
+    print("\n9. Quote dal DEM (confronto con le quote dichiarate dalla SAT)")
+    t = trails.set_index("id")
+    has = t.quota_max_dem.notna()
+    err_max = (t.quota_max_dem - t.quota_max)[has]
+    err_min = (t.quota_min_dem - t.quota_min)[has]
+    check(has.mean() > 0.99, f"profilo calcolato per {has.mean():.1%} dei sentieri")
+    check(err_max.abs().median() < 10 and err_min.abs().median() < 10,
+          f"scarto mediano quota max {err_max.abs().median():.0f} m, quota min {err_min.abs().median():.0f} m")
+    for tid in ("E101", "E542"):
+        r = t.loc[tid]
+        up_expected = r.quota_fine - r.quota_inizio
+        check(abs(r.dislivello_pos - up_expected) < 0.1 * up_expected + 20,
+              f"{tid}: D+ {r.dislivello_pos:.0f} m (salita da {r.quota_inizio} a {r.quota_fine} m)")
+
+    print("\n10. POI vicini ai sentieri")
+    pois = gpd.read_file(P / "pois.geojson")
+    print(f"  {len(pois)} POI: {pois.categoria.value_counts().to_dict()}")
+    names = dict(zip(pois.id, pois.nome))
+    e310 = [names[p["id"]] for p in t.loc["E310"].poi]
+    check("Passo Manghen" in e310, f"E310 passa dal Passo Manghen (POI: {', '.join(e310[:5])}…)")
+    check(trails.badge.map(len).gt(0).mean() > 0.5,
+          f"{trails.badge.map(len).gt(0).mean():.0%} dei sentieri ha almeno un badge")
+
+    print("\n11. Totali")
     for c, km in meta["km_per_colore"].items():
         print(f"  {c:7s} {km:7.1f} km")
 
