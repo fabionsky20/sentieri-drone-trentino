@@ -35,13 +35,13 @@ def write_geojson(gdf: gpd.GeoDataFrame, name: str, tolerance: float) -> int:
     lines = [json.dumps(f, ensure_ascii=False, separators=(",", ":")) for f in fc["features"]]
     path = config.PROCESSED / name
     path.write_text('{"type":"FeatureCollection","features":[\n' + ",\n".join(lines) + "\n]}\n",
-                    encoding="utf-8")
+                    encoding="utf-8", newline="\n")
     return path.stat().st_size
 
 
 def write_json(obj, name: str) -> int:
     path = config.PROCESSED / name
-    path.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    path.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")), encoding="utf-8", newline="\n")
     return path.stat().st_size
 
 

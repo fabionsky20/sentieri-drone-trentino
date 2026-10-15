@@ -56,5 +56,5 @@ def update(zones_on_trails) -> tuple[int, int]:
 
     body = yaml.safe_dump({"zone": dict(sorted(existing.items()))}, allow_unicode=True,
                           sort_keys=False, width=120)
-    config.AUTHORITIES_YAML.write_text(HEADER + body, encoding="utf-8")
+    config.AUTHORITIES_YAML.write_text(HEADER + body, encoding="utf-8", newline="\n")
     return len(existing), added
