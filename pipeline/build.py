@@ -38,7 +38,13 @@ def write_geojson(gdf: gpd.GeoDataFrame, name: str, tolerance: float) -> int:
     gdf = gdf.copy()
     gdf["geometry"] = gdf.geometry.simplify(tolerance, preserve_topology=True)
     gdf = gdf.to_crs(config.WEB_CRS)
-    gdf["geometry"] = shapely.set_precision(gdf.geometry.values, 10 ** -config.COORD_PRECISION)
+    grid = 10 ** -config.COORD_PRECISION
+    rounded = shapely.set_precision(gdf.geometry.values, grid)
+    # I tratti più corti della griglia (< 1 m) collasserebbero a geometria vuota (null nel file):
+    # per quelli si arrotonda punto per punto senza eliminarli.
+    collapsed = shapely.is_empty(rounded) & ~shapely.is_empty(gdf.geometry.values)
+    rounded[collapsed] = shapely.set_precision(gdf.geometry.values[collapsed], grid, mode="pointwise")
+    gdf["geometry"] = rounded
     fc = json.loads(gdf.to_json(na="null", drop_id=True))
     lines = [json.dumps(f, ensure_ascii=False, separators=(",", ":")) for f in fc["features"]]
     path = config.PROCESSED / name
@@ -140,7 +146,7 @@ def main() -> int:
     pois_out["ele"] = pois_out.ele.astype("Int64")
     sizes["pois.geojson"] = write_geojson(pois_out, "pois.geojson", 0)
     valleys_out = valleys.assign(principale=valleys.km >= config.VALLEY_MAJOR_KM)
-    sizes["valleys.geojson"] = write_geojson(valleys_out, "valleys.geojson", 30)
+    sizes["valleys.geojson"] = write_geojson(valleys_out, "valleys.geojson", 200)  # linee lisce: etichette leggibili
     sizes["search.json"] = write_json(
         enrich.search_index(trail_rows, pois.to_crs(config.WEB_CRS), valleys.to_crs(config.WEB_CRS),
                             places.to_crs(config.WEB_CRS) if len(places) else places),

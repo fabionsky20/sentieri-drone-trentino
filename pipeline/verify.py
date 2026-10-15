@@ -55,6 +55,9 @@ def main() -> int:
     check(len(ids) == len(set(ids)), "id dei sentieri univoci")
 
     print("\n2. Coerenza lunghezze (tratti vs lunghezza planimetrica SAT)")
+    for name in ("segments", "zones", "pois", "valleys"):
+        n_null = (P / f"{name}.geojson").read_text(encoding="utf-8").count('"geometry":null')
+        check(n_null == 0, f"{name}.geojson senza geometrie vuote ({n_null})")
     seg_len = segs.groupby("sentiero_id").lunghezza_m.sum()
     ratio = seg_len / trails.set_index("id").lunghezza_m
     check(ratio.between(0.95, 1.05).mean() > 0.99,
