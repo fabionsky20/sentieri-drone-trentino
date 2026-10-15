@@ -1,0 +1,17 @@
+# Dati grezzi scaricati a mano: non versionati (pesanti, licenze terze parti)
+data/raw/*
+!data/raw/.gitkeep
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Web
+web/node_modules/
+web/dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
