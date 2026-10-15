@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1f3a2e" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f3a2e'/%3E%3Cpath d='M4 25 13 10l5 8 3-4 7 11z' fill='%23fff'/%3E%3Cpath d='M4 25 13 10l3 5' stroke='%231f9d55' stroke-width='2.5' fill='none'/%3E%3C/svg%3E"
+    />
+    <title>Sentieri &amp; Drone</title>
+  </head>
+  <body>
+    <header class="bar">
+      <span class="brand">Sentieri &amp; Drone</span>
+      <label class="day">
+        <span>Volo il</span>
+        <input type="date" id="day" required />
+      </label>
+      <button type="button" id="toggle-zones" class="toggle" aria-pressed="false">Zone</button>
+    </header>
+
+    <div id="map" aria-label="Mappa dei sentieri"></div>
+
+    <details id="legend" open>
+      <summary>Legenda</summary>
+      <ul>
+        <li><i class="sw verde"></i>Volo libero (max 120 m)</li>
+        <li><i class="sw giallo"></i>Libero fino alla quota indicata</li>
+        <li><i class="sw rosso"></i>Vietato o con autorizzazione</li>
+      </ul>
+      <p id="snapshot" class="snapshot"></p>
+    </details>
+
+    <aside id="panel" hidden>
+      <button type="button" class="close" id="panel-close" aria-label="Chiudi">×</button>
+      <div id="panel-body"></div>
+    </aside>
+
+    <div id="status" class="status">Caricamento dati…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

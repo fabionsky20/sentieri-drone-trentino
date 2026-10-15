@@ -78,6 +78,16 @@ docs/            documentazione (DATA.md, ...)
 - **Build dati (comando unico)**: `.venv\Scripts\python -m pipeline.build`. Legge i file più recenti in `data/raw/` (zip/gz) e scrive `data/processed/` + `data/authorities.yaml`.
 - **Verifica a campione**: `.venv\Scripts\python -m pipeline.verify` (esce con errore se un controllo fallisce).
 - Formato dei file prodotti: `docs/DATA.md` §4.
+- **Web app** (in `web/`): `npm run dev` (sviluppo, serve anche `data/processed/` su `/data/`), `npm run build` (→ `web/dist/`, con i dati copiati in `dist/data/`).
+- CI: `.github/workflows/deploy.yml` builda a ogni push; il deploy su Pages parte solo con la variabile di repo `DEPLOY_PAGES=true`.
+
+## Web app (fase 2)
+
+- `web/src/main.ts`: mappa, layer, click, data scelta. `flight.ts`: regola dei colori per data (stessa logica di `pipeline/dflight.py`, da tenere allineate). `panel.ts`: contenuto del pannello (solo `textContent`, nessun HTML dei dati interpretato).
+- Sfondo: OpenTopoMap (raster, max zoom 17, senza chiave). Font delle etichette: `protomaps.github.io/basemaps-assets` (Noto Sans).
+- MapLibre 6: il worker va impacchettato da Vite (`?worker&url` + `setWorkerUrl`), altrimenti la mappa resta vuota.
+- `base: './'` in Vite: la stessa build funziona sotto `/nome-repo/` (Pages) o alla radice di un dominio.
+- Data scelta: un NOTAM è attivo se la sua validità si sovrappone anche in parte al giorno locale scelto.
 
 ## Decisioni prese
 
@@ -91,4 +101,5 @@ docs/            documentazione (DATA.md, ...)
 
 - **Fase 0** ✅ setup repo, venv, ispezione dati, `docs/DATA.md`, questo file, primo push.
 - **Fase 1** ✅ incrocio sentieri × zone D-Flight → tratti colorati (`pipeline/build.py`).
-- Fasi successive da pianificare (web app base, POI, ricerca, filtri, chiusure, PWA, meteo).
+- **Fase 2** ✅ web app base: mappa, tratti colorati, zone, pannelli, data NOTAM, CI. Hosting da decidere (Pages non disponibile su repo privato con piano Free).
+- Fasi successive da pianificare (POI, ricerca, filtri, chiusure, PWA, meteo).
