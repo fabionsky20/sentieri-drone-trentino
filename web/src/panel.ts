@@ -80,6 +80,7 @@ export interface TrailView {
   closures: { all: Closure[]; active: Closure[] } // tutte / in vigore nella data scelta
   zones: Map<string, ZoneProps>
   pois: Map<string, PoiProps>
+  save: HTMLElement // pulsanti "Salva", gestiti da chi chiama
   profile: HTMLElement // contenitore del profilo, riempito da chi chiama
   photos: HTMLElement // contenitore delle foto, riempito da chi chiama
   onZone: (ids: string[]) => void
@@ -185,6 +186,7 @@ export function renderTrail(v: TrailView): HTMLElement {
     h('h2', {}, trail.titolo),
     trail.nome ? h('p', { class: 'sub' }, `${trail.loc_inizio} → ${trail.loc_fine}`) : null,
     trail.badge.length ? badgeRow(trail.badge) : null,
+    v.save,
     closureSection(v.closures),
     segmentSection(v),
     h(

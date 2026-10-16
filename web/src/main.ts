@@ -13,6 +13,7 @@ import { CATEGORIES, CATEGORY_ORDER, registerIcons } from './icons'
 import { badgeRow, catIcon, formatDate, h, kmVal, renderPoi, renderTrail, renderZones } from './panel'
 import { photosSection } from './photos'
 import { renderProfile } from './profile'
+import type { ListName, SavedState } from './saved'
 import { rank } from './search'
 import { buildTrailLines, pointAt } from './trailgeom'
 import type {
@@ -499,8 +500,12 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const photoPoints = line ? [0.2, 0.5, 0.8].map((f) => pointAt(line, f * line.length)) : []
   const back: Selection = { kind: 'trail', id: trail.id, seg: segId }
   const seg = segId ? segById.get(segId) : undefined
+  const saveBox = h('div', { class: 'savebox' })
+  currentSave = { trailId: trail.id, box: saveBox }
+  renderSaveBox()
   return renderTrail({
     trail,
+    save: saveBox,
     segment: seg ? { seg, eff: eff.get(seg.id)! } : undefined,
     trailKm: trailKm.get(trail.id)!,
     closures: {
@@ -612,7 +617,13 @@ function applyFilters(): void {
   const ok = new Set<string>()
   const results: Trail[] = []
   for (const t of trailList) {
-    if (matches(t, trailKm.get(t.id) ?? { verde: 0, giallo: 0, rosso: 0 }, filters, closedIds.has(t.id))) {
+    const ctx = {
+      km: trailKm.get(t.id) ?? { verde: 0, giallo: 0, rosso: 0 },
+      closed: closedIds.has(t.id),
+      mine: saved?.miei.has(t.id) ?? false,
+      shared: saved?.condivisi.has(t.id) ?? false,
+    }
+    if (matches(t, ctx, filters)) {
       ok.add(t.id)
       results.push(t)
     }
@@ -638,6 +649,7 @@ function applyFilters(): void {
     const k = km(t)
     const meta = [
       closedIds.has(t.id) ? 'CHIUSO' : null,
+      saved?.miei.has(t.id) || saved?.condivisi.has(t.id) ? '★ salvato' : null,
       kmVal((t.lunghezza_m ?? 0) / 1000),
       t.dislivello_pos != null ? `+${t.dislivello_pos} m` : null,
       t.difficolta,
@@ -793,5 +805,191 @@ for (const layer of ['seg-hit', 'zone-fill', 'poi-icons']) {
   map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'))
   map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''))
 }
+
+// ---------------------------------------------------------------- sentieri salvati (Firebase)
+
+// Il modulo Firebase si scarica solo quando serve: al primo uso di "Salva"/"Salvati", oppure
+// subito all'avvio se su questo dispositivo era già stato fatto il login.
+let saved: SavedState | null = null
+let savedModule: Promise<typeof import('./saved')> | null = null
+let currentSave: { trailId: string; box: HTMLElement } | null = null
+
+function loadSaved(): Promise<typeof import('./saved')> {
+  if (!savedModule) {
+    savedModule = import('./saved')
+    savedModule
+      .then((m) =>
+        m.subscribe((st) => {
+          saved = st
+          store('salvati-attivo', st.status !== 'anonimo')
+          renderSaveBox()
+          renderSavedSheet()
+          applyFilters()
+        }),
+      )
+      .catch((e) => {
+        savedModule = null
+        showSavedError(`Impossibile caricare il servizio dei salvati: ${e.message}`)
+      })
+  }
+  return savedModule
+}
+
+const savedEl = $('saved')
+const savedBody = $('saved-body')
+
+function openSaved(): void {
+  closeFilters()
+  savedEl.hidden = false
+  $('legend').hidden = !mobile()
+  if (mobile()) select(null)
+  loadSaved()
+  renderSavedSheet()
+}
+function closeSaved(): void {
+  savedEl.hidden = true
+  $('legend').hidden = filtersOpen() && !mobile()
+}
+$('open-saved').addEventListener('click', () => (savedEl.hidden ? openSaved() : closeSaved()))
+$('saved-close').addEventListener('click', closeSaved)
+$('open-filters').addEventListener('click', closeSaved)
+
+function showSavedError(msg: string): void {
+  const status = $('status')
+  status.textContent = msg
+  status.hidden = false
+  setTimeout(() => applyDay(), 6000) // poi torna l'avviso dei NOTAM
+}
+
+async function doLogin(): Promise<void> {
+  try {
+    const m = await loadSaved()
+    await m.login()
+  } catch (e) {
+    const code = (e as { code?: string }).code ?? ''
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return
+    showSavedError(
+      code === 'auth/popup-blocked'
+        ? 'Il browser ha bloccato la finestra di accesso: consenti i popup per questo sito.'
+        : `Accesso non riuscito (${code || (e as Error).message}).`,
+    )
+  }
+}
+
+async function toggleSaved(list: ListName, trailId: string): Promise<void> {
+  const m = await loadSaved()
+  if (saved?.status !== 'membro') {
+    openSaved()
+    return
+  }
+  const has = list === 'miei' ? saved.miei.has(trailId) : saved.condivisi.has(trailId)
+  try {
+    await (has ? m.remove(list, trailId) : m.save(list, trailId))
+  } catch (e) {
+    showSavedError(`Salvataggio non riuscito: ${(e as Error).message}`)
+  }
+}
+
+/** Pulsanti "Salva" nella scheda del sentiero. */
+function renderSaveBox(): void {
+  if (!currentSave) return
+  const { trailId, box } = currentSave
+  const button = (list: ListName, label: string) => {
+    const on = list === 'miei' ? saved?.miei.has(trailId) : saved?.condivisi.has(trailId)
+    const b = h('button', { type: 'button', class: 'savebtn', 'aria-pressed': String(!!on) }, `${on ? '★' : '☆'} ${label}`)
+    b.addEventListener('click', () => toggleSaved(list, trailId))
+    return b
+  }
+  box.replaceChildren(button('miei', 'Miei'), button('condivisi', 'Condivisi'))
+}
+
+function savedList(entries: [string, { aggiunto: Date | null; da?: string }][], list: ListName): HTMLElement {
+  const known = entries.filter(([id]) => trails.has(id))
+  if (!known.length) {
+    return h(
+      'p',
+      { class: 'muted small' },
+      list === 'miei' ? 'Nessun sentiero salvato: usa "☆ Miei" nella scheda di un sentiero.' : 'La lista condivisa è vuota.',
+    )
+  }
+  const ul = h('ul', { class: 'results' })
+  known.sort((a, b) => (b[1].aggiunto?.getTime() ?? 0) - (a[1].aggiunto?.getTime() ?? 0))
+  for (const [id, info] of known) {
+    const t = trails.get(id)!
+    const who = info.da ? `aggiunto da ${saved?.membri.get(info.da) ?? 'un membro'}` : null
+    const open = h(
+      'button',
+      { type: 'button' },
+      h('span', { class: 'r-title' }, `${t.numero} · ${t.titolo}`),
+      h('span', { class: 'r-meta' }, [kmVal((t.lunghezza_m ?? 0) / 1000), closedIds.has(id) ? 'CHIUSO' : null, who].filter(Boolean).join(' · ')),
+    )
+    open.addEventListener('click', () => {
+      if (mobile()) closeSaved()
+      select({ kind: 'trail', id })
+      fitTrail(t)
+    })
+    const del = h('button', { type: 'button', class: 'remove', 'aria-label': `Togli ${t.numero} dalla lista`, title: 'Togli dalla lista' }, '×')
+    del.addEventListener('click', () => toggleSaved(list, id))
+    ul.append(h('li', { class: 'saved-item' }, open, del))
+  }
+  return ul
+}
+
+/** Contenuto della sezione "Salvati" secondo lo stato del login. */
+function renderSavedSheet(): void {
+  if (savedEl.hidden) return
+  const st = saved
+  const parts: HTMLElement[] = []
+  const retry = () => {
+    const b = h('button', { type: 'button', class: 'primary' }, 'Riprova')
+    b.addEventListener('click', () => loadSaved().then((m) => m.retry()))
+    return b
+  }
+  if (!st || st.status === 'caricamento') {
+    parts.push(h('p', { class: 'muted' }, 'Caricamento…'))
+  } else if (st.status === 'anonimo') {
+    const b = h('button', { type: 'button', class: 'primary' }, 'Accedi con Google')
+    b.addEventListener('click', doLogin)
+    parts.push(
+      h('p', {}, "Accedi per salvare i sentieri e ritrovarli sincronizzati su telefono e PC. L'accesso resta attivo: non serve rifarlo ogni volta."),
+      b,
+    )
+  } else if (st.status === 'non-membro') {
+    const uid = st.user?.uid ?? ''
+    const copy = h('button', { type: 'button', class: 'link' }, 'Copia')
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(uid)
+        copy.textContent = 'Copiato'
+      } catch {
+        copy.textContent = 'Selezionalo e copialo a mano'
+      }
+    })
+    parts.push(
+      h('p', {}, `Accesso fatto come ${st.user?.nome ?? st.user?.email ?? 'utente Google'}, ma questo account non è ancora tra i membri dell'app.`),
+      h('p', { class: 'small' }, 'Il tuo ID utente, da aggiungere ai membri:'),
+      h('p', { class: 'uid' }, h('code', {}, uid), ' ', copy),
+      retry(),
+    )
+  } else if (st.status === 'errore') {
+    parts.push(h('p', { class: 'warn' }, `Errore: ${st.errore}`), retry())
+  } else {
+    parts.push(
+      h('h3', {}, `I miei (${st.miei.size})`),
+      savedList([...st.miei], 'miei'),
+      h('h3', {}, `Condivisi (${st.condivisi.size})`),
+      h('p', { class: 'muted small' }, `Lista comune a tutti i membri: ${[...st.membri.values()].join(', ')}.`),
+      savedList([...st.condivisi], 'condivisi'),
+    )
+  }
+  if (st?.user) {
+    const out = h('button', { type: 'button', class: 'link' }, 'Esci')
+    out.addEventListener('click', () => loadSaved().then((m) => m.logout()))
+    parts.push(h('p', { class: 'muted small account' }, `Account: ${st.user.nome ?? ''}${st.user.email ? ` (${st.user.email})` : ''} · `, out))
+  }
+  savedBody.replaceChildren(...parts)
+}
+
+if (stored('salvati-attivo', false)) loadSaved()
 
 applyDay()

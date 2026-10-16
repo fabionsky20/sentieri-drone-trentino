@@ -843,3 +843,81 @@ dd {
 .closure-note p {
   margin: 8px 0 0;
 }
+
+/* ------------------------------------------------------------ salvati (fase 5) */
+
+.savebox {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.savebtn {
+  font: inherit;
+  font-size: 14px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.savebtn[aria-pressed='true'] {
+  background: #fff7d6;
+  border-color: var(--giallo);
+  font-weight: 600;
+}
+
+.primary {
+  font: inherit;
+  font-weight: 600;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--bar);
+  color: #fff;
+  cursor: pointer;
+}
+
+.saved h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 16px 0 4px;
+}
+
+.saved-item {
+  display: flex;
+  align-items: stretch;
+}
+
+.saved-item > button:first-child {
+  flex: 1;
+}
+
+.saved-item .remove {
+  width: 44px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font-size: 20px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.uid code {
+  font-size: 13px;
+  background: #f1f3f2;
+  padding: 3px 6px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.account {
+  margin-top: 18px;
+}

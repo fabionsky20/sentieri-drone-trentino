@@ -1,0 +1,49 @@
+// Regole di sicurezza di Firestore per "Sentieri & Drone".
+// Vanno copiate nella console Firebase: Firestore Database → Regole → Pubblica.
+// Questo file nel repo è solo la copia di riferimento (nessun dato personale).
+//
+// Chi può fare cosa:
+// - "membri/{uid}": l'elenco degli utenti ammessi. Si modifica SOLO dalla console Firebase
+//   (un documento per persona, con ID = UID dell'utente, campo "nome").
+// - "utenti/{uid}/salvati/{sentiero}": i preferiti di ciascuno, visibili solo al proprietario.
+// - "condivisi/{sentiero}": la lista comune, letta e modificata da tutti i membri.
+// Chi non è membro (anche se ha fatto login con Google) non legge e non scrive nulla.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isMember() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/membri/$(request.auth.uid));
+    }
+
+    // Id dei sentieri SAT: E310, O207, E102A, E396-b …
+    function validTrail(id) {
+      return id.matches('^[EO][0-9]{3}[A-Z]?(-[a-z])?$');
+    }
+
+    match /membri/{uid} {
+      allow read: if isMember();
+      allow write: if false;
+    }
+
+    match /utenti/{uid}/salvati/{trail} {
+      allow read, delete: if isMember() && request.auth.uid == uid;
+      allow create, update: if isMember() && request.auth.uid == uid
+        && validTrail(trail)
+        && request.resource.data.keys().hasOnly(['aggiunto'])
+        && request.resource.data.aggiunto == request.time;
+    }
+
+    match /condivisi/{trail} {
+      allow read, delete: if isMember();
+      allow create, update: if isMember()
+        && validTrail(trail)
+        && request.resource.data.keys().hasOnly(['aggiunto', 'da'])
+        && request.resource.data.da == request.auth.uid
+        && request.resource.data.aggiunto == request.time;
+    }
+  }
+}

@@ -113,5 +113,8 @@ docs/            documentazione (DATA.md, ...)
   Niente segreti nel repo: non aggiungere mai token o dati personali.
 - **Fase 3** ✅ mappa pulita: sfondo vettoriale + rilievo, selettore sfondo, tratti con ombra e bordo chiaro.
 - **Fase 4** ✅ POI OSM + valli, badge di prossimità, dislivello e profilo dal DEM, filtri, ricerca, foto Wikimedia, icone POI. Dettagli dati in `docs/DATA.md` §5. Il design dell'app si rifà alla fine: per ora lo stile è funzionale.
-- **Fase 5** — chiusure ✅ (`data/closures.yaml` → `pipeline/closures.py` → `closures.json`; `web/src/closures.ts`, filtro "Solo sentieri aperti"). Sentieri salvati e sincronizzati: in valutazione, **non implementare senza conferma dell'utente** (proposta: Firebase Auth + Firestore, piano Spark).
+- **Fase 5** ✅ chiusure (`data/closures.yaml` → `pipeline/closures.py` → `closures.json`; `web/src/closures.ts`, filtro "Solo sentieri aperti") e sentieri salvati con Firebase (Auth Google + Firestore, progetto `sentieri-e-drone`, piano Spark).
+  - `web/src/saved.ts` caricato solo quando serve (import dinamico; subito all'avvio se il dispositivo aveva già fatto login, flag `salvati-attivo`). Login con popup (non redirect: il sito non è ospitato su Firebase).
+  - Membri in `membri/{uid}`, aggiunti a mano dalla console: guida in `docs/SALVATI.md`. Regole in `firestore.rules` (copia di riferimento: vanno pubblicate dalla console). Mai email o dati personali nel repo.
+  - Gli avvisi "Cross-Origin-Opener-Policy … window.closed" in console durante il login con popup sono noti e innocui.
 - Fasi successive da pianificare (PWA offline, meteo, design finale).

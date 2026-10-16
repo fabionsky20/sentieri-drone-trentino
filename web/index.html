@@ -20,6 +20,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z" /></svg>
         <span id="filter-count" class="count" hidden></span>
       </button>
+      <button type="button" id="open-saved" class="iconbtn" aria-label="Salvati" title="Sentieri salvati">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z" /></svg>
+      </button>
       <label class="day">
         <span>Volo il</span>
         <input type="date" id="day" required />
@@ -58,6 +61,14 @@
       <div id="filters-form"></div>
       <p id="filters-summary" class="filters-summary"></p>
       <ul id="filters-results" class="results"></ul>
+    </aside>
+
+    <aside id="saved" class="filters saved" hidden>
+      <div class="filters-head">
+        <h2>Salvati</h2>
+        <button type="button" id="saved-close" class="close" aria-label="Chiudi salvati">×</button>
+      </div>
+      <div id="saved-body"></div>
     </aside>
 
     <aside id="panel" hidden>

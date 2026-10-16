@@ -5,10 +5,12 @@ import { catIcon, h } from './panel'
 import type { PoiCategory, Trail } from './types'
 
 export type Volo = 'qualsiasi' | 'verde' | 'tutto'
+export type Salvati = '' | 'miei' | 'condivisi' | 'entrambi'
 export type KmByColor = { verde: number; giallo: number; rosso: number }
 
 export interface FilterState {
   soloAperti: boolean // esclude i sentieri chiusi nella data scelta
+  salvati: Salvati // '' = tutti i sentieri
   volo: Volo
   verdeKm: number // per volo = 'verde': almeno questi km di tratti verdi
   vicino: Set<PoiCategory> // deve avere TUTTE le categorie scelte
@@ -22,6 +24,7 @@ export interface FilterState {
 
 export const defaultFilters = (): FilterState => ({
   soloAperti: false,
+  salvati: '',
   volo: 'qualsiasi',
   verdeKm: 1,
   vicino: new Set(),
@@ -43,14 +46,27 @@ export function activeCount(f: FilterState): number {
     Number(f.dislMax != null) +
     Number(f.quotaMin != null) +
     Number(!!f.gruppo) +
-    Number(f.soloAperti)
+    Number(f.soloAperti) +
+    Number(!!f.salvati)
   )
 }
 
 const diffGroup = (d: string | null) => (d?.startsWith('EEA') ? 'EEA' : (d ?? ''))
 
-export function matches(t: Trail, km: KmByColor, f: FilterState, closed: boolean): boolean {
-  if (f.soloAperti && closed) return false
+/** Dati del sentiero che dipendono dalla data scelta o dall'utente. */
+export interface TrailContext {
+  km: KmByColor
+  closed: boolean
+  mine: boolean // nei miei salvati
+  shared: boolean // nella lista condivisa
+}
+
+export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
+  const { km } = ctx
+  if (f.soloAperti && ctx.closed) return false
+  if (f.salvati === 'miei' && !ctx.mine) return false
+  if (f.salvati === 'condivisi' && !ctx.shared) return false
+  if (f.salvati === 'entrambi' && !ctx.mine && !ctx.shared) return false
   if (f.volo === 'verde' && km.verde < f.verdeKm) return false
   if (f.volo === 'tutto' && km.rosso > 0.005) return false
   for (const c of f.vicino) if (!t.badge.includes(c)) return false
@@ -172,6 +188,23 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     }),
   )
 
-  form.append(statoBox, voloBox, vicinoBox, diffBox, numBox, gruppoBox)
+  // Salvati
+  const salvSelect = h('select', {}) as HTMLSelectElement
+  for (const [value, label] of [
+    ['', 'Tutti i sentieri'],
+    ['miei', 'Solo i miei salvati'],
+    ['condivisi', 'Solo la lista condivisa'],
+    ['entrambi', 'Miei o condivisi'],
+  ]) {
+    salvSelect.append(h('option', { value }, label))
+  }
+  salvSelect.value = f.salvati
+  salvSelect.addEventListener('change', () => {
+    f.salvati = salvSelect.value as Salvati
+    onChange()
+  })
+  const salvBox = h('fieldset', {}, h('legend', {}, 'Salvati'), salvSelect)
+
+  form.append(statoBox, salvBox, voloBox, vicinoBox, diffBox, numBox, gruppoBox)
   return form
 }
