@@ -14,6 +14,7 @@ const PATHS: Record<string, string> = {
   minus: '<path d="M5 12h14"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
   back: '<path d="m14.5 5.5-6.5 6.5 6.5 6.5"/>',
+  chevronRight: '<path d="m9.5 5.5 6.5 6.5-6.5 6.5"/>',
   focus: '<path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/><circle cx="12" cy="12" r="2.5"/>',
   edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   bell: '<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',

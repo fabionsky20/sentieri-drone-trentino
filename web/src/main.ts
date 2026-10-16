@@ -470,27 +470,97 @@ if (meta.snapshot) {
   el.title = 'Data dello snapshot delle zone D-Flight. I NOTAM pubblicati dopo non sono inclusi.'
 }
 
-// ---------------------------------------------------------------- navigazione (telefono) e colonne (PC)
+// ---------------------------------------------------------------- pannelli: telefono (schermate) · tablet/PC (sinistra | mappa | destra)
 
+// Telefono: una schermata intera alla volta (filtri, risultati, salvati, profilo…) + scheda in basso.
+// Tablet/PC: pannello SINISTRO = scoprire (filtri; la scheda di sentiero/POI/zona li copre),
+// pannello DESTRO = le mie cose (salvati, bacheche, profilo, notifiche). Tablet: uno solo alla volta.
 const side = $('side')
+const mine = $('mine')
+const layout = document.querySelector<HTMLElement>('.layout')!
 type View = 'filters' | 'results' | 'saved' | 'profile' | 'board' | 'notifs'
 type Tab = 'map' | 'filters' | 'saved' | 'profile'
+type RightView = 'saved' | 'board' | 'profile' | 'notifs'
+const RIGHT_VIEWS: RightView[] = ['saved', 'board', 'profile', 'notifs']
+const isRight = (v: View): v is RightView => (RIGHT_VIEWS as string[]).includes(v)
 const VIEW_TAB: Record<View, Tab> = { filters: 'filters', results: 'filters', saved: 'saved', board: 'saved', profile: 'profile', notifs: 'profile' }
+/** Tablet (768–1023): un solo pannello alla volta, sovrapposto alla mappa. */
+const tablet = () => !mobile() && !MQ_WIDE.matches
+let leftOpen = true
+let rightView: RightView | null = null
 
-function showView(view: View): void {
-  for (const v of ['filters', 'results', 'saved', 'profile', 'board', 'notifs'] as View[]) $(`${v}-view`).hidden = v !== view
-  side.dataset.view = view
+/** Le viste "mie" si aggiornano quando diventano visibili. */
+function refreshMine(): void {
+  loadAccount()
+  renderSavedSheet()
+  renderProfileView()
+  renderBoardView()
+  renderNotifsView()
+}
+
+function pressHeader(view: View | null): void {
   $('open-saved').setAttribute('aria-pressed', String(view === 'saved' || view === 'board'))
   $('open-profile').setAttribute('aria-pressed', String(view === 'profile'))
   $('open-notifs').setAttribute('aria-pressed', String(view === 'notifs'))
-  if (view !== 'filters' && view !== 'results') {
-    loadAccount()
-    renderSavedSheet()
-    renderProfileView()
-    renderBoardView()
-    renderNotifsView()
+}
+
+function showView(view: View): void {
+  if (!mobile()) {
+    if (isRight(view)) setRight(view)
+    else setLeft(true)
+    return
   }
+  for (const v of ['filters', 'results', 'saved', 'profile', 'board', 'notifs'] as View[]) $(`${v}-view`).hidden = v !== view
+  side.dataset.view = view
+  pressHeader(view)
+  if (isRight(view)) refreshMine()
   markTab(VIEW_TAB[view])
+}
+
+/** Apre o comprime il pannello sinistro (tablet: chiude il destro). */
+function setLeft(open: boolean): void {
+  leftOpen = open
+  if (open && tablet()) rightView = null
+  syncPanels()
+}
+
+/** Apre una vista nel pannello destro, o lo chiude con null (tablet: chiude il sinistro). */
+function setRight(view: RightView | null): void {
+  rightView = view
+  if (view && tablet()) leftOpen = false
+  syncPanels()
+  if (view) refreshMine()
+}
+
+function syncPanels(): void {
+  layout.dataset.left = String(leftOpen)
+  layout.dataset.right = String(!!rightView)
+  for (const v of RIGHT_VIEWS) $(`${v}-view`).hidden = v !== rightView
+  pressHeader(rightView)
+  const tab = $('left-tab')
+  const label = leftOpen ? 'Comprimi il pannello' : 'Mostra il pannello'
+  tab.setAttribute('aria-label', label)
+  tab.setAttribute('aria-expanded', String(leftOpen))
+  tab.title = label
+}
+
+/** Sposta le viste "mie" tra le schermate del telefono e il pannello destro, e la scheda dove serve. */
+function placePanels(): void {
+  if (mobile()) {
+    for (const v of RIGHT_VIEWS) side.insertBefore($(`${v}-view`), $('left-resizer'))
+    side.dataset.open = 'false'
+    showView(rightView ?? 'filters')
+    markTab('map')
+  } else {
+    const was = side.dataset.view as View
+    if (side.dataset.open === 'true' && isRight(was)) rightView = was
+    for (const v of RIGHT_VIEWS) mine.append($(`${v}-view`))
+    $('filters-view').hidden = false
+    $('results-view').hidden = true
+    if (tablet() && rightView) leftOpen = false
+    syncPanels()
+  }
+  placeSheet()
 }
 
 function markTab(tab: Tab): void {
@@ -510,7 +580,7 @@ function setTab(tab: Tab): void {
   markTab(tab)
 }
 
-/** Apre una vista della colonna (PC) o a tutto schermo (telefono). */
+/** Apre una vista: schermata intera sul telefono, pannello su tablet/PC. */
 function openView(view: View): void {
   if (mobile()) {
     side.dataset.open = 'true'
@@ -519,22 +589,83 @@ function openView(view: View): void {
   showView(view)
 }
 
+/** Chiude una vista "mia": sul telefono torna alla mappa, altrove chiude il pannello destro. */
+const closeMine = () => (mobile() ? setTab('map') : setRight(null))
+
 for (const b of document.querySelectorAll<HTMLElement>('.tab')) b.addEventListener('click', () => setTab(b.dataset.tab as Tab))
 $('open-filters').addEventListener('click', () => setTab('filters'))
 $('filters-close').addEventListener('click', () => setTab('map'))
-$('saved-close').addEventListener('click', () => setTab('map'))
-$('profile-close').addEventListener('click', () => setTab('map'))
-$('notifs-close').addEventListener('click', () => (mobile() ? showView('profile') : showView('filters')))
+$('saved-close').addEventListener('click', closeMine)
+$('profile-close').addEventListener('click', closeMine)
+$('board-close').addEventListener('click', closeMine)
+$('notifs-close').addEventListener('click', () => (mobile() ? showView('profile') : setRight(null)))
 $('board-back').addEventListener('click', () => showView('saved'))
 $('show-results').addEventListener('click', () => showView('results'))
 $('results-back').addEventListener('click', () => showView('filters'))
 $('results-map').addEventListener('click', () => setTab('map'))
-// PC: i pulsanti dell'header alternano la colonna sinistra con i Filtri.
-$('open-saved').addEventListener('click', () => showView(side.dataset.view === 'saved' ? 'filters' : 'saved'))
-$('open-profile').addEventListener('click', () => showView(side.dataset.view === 'profile' ? 'filters' : 'profile'))
-$('open-notifs').addEventListener('click', () => showView(side.dataset.view === 'notifs' ? 'filters' : 'notifs'))
+// Tablet/PC: le icone dell'header aprono il pannello destro; ricliccarle lo chiude.
+$('open-saved').addEventListener('click', () => setRight(rightView === 'saved' ? null : 'saved')) // da una bacheca torna all'elenco
+$('open-profile').addEventListener('click', () => setRight(rightView === 'profile' ? null : 'profile'))
+$('open-notifs').addEventListener('click', () => setRight(rightView === 'notifs' ? null : 'notifs'))
 $('profile-notifs').addEventListener('click', () => showView('notifs'))
-showView('filters')
+$('left-tab').addEventListener('click', () => setLeft(!leftOpen))
+
+// ---- maniglie per ridimensionare i pannelli (PC): trascina, doppio clic = larghezza predefinita
+const PANEL_MIN = 280
+
+function setupResizer(which: 'left' | 'right'): void {
+  const handle = $(`${which}-resizer`)
+  const panel = which === 'left' ? side : mine
+  const key = `pannello-${which}`
+  const prop = `--${which}-w`
+  const clamp = (w: number) => Math.round(Math.max(PANEL_MIN, Math.min(w, window.innerWidth * 0.5)))
+  const apply = (w: number | null) => {
+    if (w == null) layout.style.removeProperty(prop)
+    else layout.style.setProperty(prop, `${clamp(w)}px`)
+    map.resize()
+  }
+  const saved = stored<number | null>(key, null)
+  if (saved) layout.style.setProperty(prop, `${saved}px`)
+  handle.tabIndex = 0
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    handle.setPointerCapture(e.pointerId)
+    handle.classList.add('dragging')
+    document.body.classList.add('resizing')
+    let last = panel.clientWidth
+    const move = (ev: PointerEvent) => {
+      const r = panel.getBoundingClientRect()
+      last = clamp(which === 'left' ? ev.clientX - r.left : r.right - ev.clientX)
+      apply(last)
+    }
+    const end = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.classList.remove('dragging')
+      document.body.classList.remove('resizing')
+      store(key, last)
+      map.resize()
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', end, { once: true })
+    handle.addEventListener('pointercancel', end, { once: true })
+  })
+  handle.addEventListener('dblclick', () => {
+    apply(null)
+    store(key, null)
+  })
+  // Da tastiera: frecce sinistra/destra.
+  handle.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    const grow = (e.key === 'ArrowRight') === (which === 'left')
+    const w = clamp(panel.clientWidth + (grow ? 24 : -24))
+    apply(w)
+    store(key, w)
+  })
+}
+setupResizer('left')
+setupResizer('right')
 
 // ---------------------------------------------------------------- scheda
 
@@ -543,17 +674,18 @@ const body = $('panel-body')
 const foot = $('panel-foot')
 const hoverMarker = new maplibregl.Marker({ element: h('div', { class: 'hover-dot' }) })
 
-/** Dove vive la scheda: PC largo → colonna destra; tablet → sopra la mappa;
- *  telefono → in cima alla pagina, così copre anche barra in alto e navigazione. */
+/** Dove vive la scheda: telefono → in cima alla pagina (copre barra in alto e navigazione);
+ *  tablet/PC → nel pannello sinistro, sopra i filtri. */
 function placeSheet(): void {
-  const target = MQ_WIDE.matches ? $('detail') : mobile() ? document.body : document.querySelector('.mapwrap')!
+  const target = mobile() ? document.body : side
   if (sheet.parentElement !== target) target.append(sheet)
   sheet.classList.remove('expanded')
 }
-placeSheet()
-MQ_WIDE.addEventListener('change', placeSheet)
-MQ_MOBILE.addEventListener('change', placeSheet)
+placePanels()
+MQ_WIDE.addEventListener('change', placePanels)
+MQ_MOBILE.addEventListener('change', placePanels)
 $('sheet-handle').addEventListener('click', () => sheet.classList.toggle('expanded'))
+$('sheet-filters').addEventListener('click', () => select(null))
 
 function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const line = trailLines.get(trail.id)
@@ -610,7 +742,6 @@ function render(): void {
   map.setFilter('poi-sel', ['==', ['get', 'id'], selection?.kind === 'poi' ? selection.id : ''])
   if (!selection) {
     sheet.hidden = true
-    $('detail-empty').hidden = false
     currentSave = null
     return
   }
@@ -641,7 +772,8 @@ function render(): void {
   }
   renderSaveBox()
   sheet.hidden = false
-  $('detail-empty').hidden = true
+  // Tablet/PC: la scheda sta nel pannello sinistro, che va aperto (sul tablet chiude il destro).
+  if (!mobile() && (!leftOpen || (tablet() && rightView))) setLeft(true)
   body.scrollTop = 0
   if (mobile()) setTabSilently('map') // su telefono la scheda sta sopra la mappa
 }
@@ -672,7 +804,10 @@ function sortZones(list: ZoneProps[]): ZoneProps[] {
 
 function fitPadding(): maplibregl.PaddingOptions {
   if (mobile()) return { top: 150, left: 30, right: 70, bottom: Math.round(window.innerHeight * 0.55) }
-  if (!MQ_WIDE.matches && !sheet.hidden) return { top: 40, left: 40, right: 420, bottom: 40 }
+  if (tablet()) {
+    const w = Math.min(380, window.innerWidth * 0.85) + 40
+    return { top: 40, left: leftOpen ? w : 40, right: rightView ? w : 70, bottom: 40 }
+  }
   return { top: 40, left: 40, right: 70, bottom: 40 }
 }
 

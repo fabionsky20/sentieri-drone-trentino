@@ -393,6 +393,13 @@ a {
   display: none !important;
 }
 
+/* Solo su tablet e PC (pannello destro, linguetta e maniglie dei pannelli). */
+.mine,
+.edgetab,
+.resizer {
+  display: none;
+}
+
 /* Su telefono il contenitore non crea un livello proprio: mappa, schermate e scheda
    si sovrappongono a barra in alto e navigazione secondo il loro z-index. */
 .layout {
@@ -2398,7 +2405,8 @@ button:disabled {
     align-items: center;
     gap: 10px;
     flex: none;
-    width: 308px;
+    width: auto;
+    margin-right: 8px;
   }
 
   .brand-mark {
@@ -2466,20 +2474,80 @@ button:disabled {
     color: var(--on-accent);
   }
 
+  .iconbtn.desktop-only {
+    display: inline-grid !important;
+  }
+
+  .btn-text.desktop-only {
+    display: inline-flex !important;
+  }
+
+  /* Tre aree nella stessa griglia: pannello sinistro (scoprire) | mappa | pannello destro (le mie cose).
+     Le larghezze arrivano da main.ts (--left-w / --right-w, trascinando le maniglie). */
   .layout {
     position: relative;
     display: grid;
-    grid-template-columns: 340px 1fr;
+    --lw: 0px;
+    --rw: 0px;
+    grid-template-columns: var(--lw) minmax(0, 1fr) var(--rw);
+    grid-template-rows: minmax(0, 1fr);
     min-height: 0;
   }
 
   .side {
-    position: static;
-    z-index: auto; /* sul telefono è una schermata sopra tutto; qui una colonna normale */
+    grid-column: 1;
+    grid-row: 1;
+    position: relative;
+    z-index: 2; /* la maniglia sporge di qualche pixel sulla mappa */
     display: block;
     border-right: 1px solid var(--line);
     min-height: 0;
-    overflow: hidden;
+  }
+
+  .layout[data-left='false'] .side {
+    display: none;
+  }
+
+  .mine {
+    grid-column: 3;
+    grid-row: 1;
+    position: relative;
+    z-index: 2;
+    min-height: 0;
+    border-left: 1px solid var(--line);
+    background: var(--panel);
+  }
+
+  .layout[data-right='true'] .mine {
+    display: block;
+  }
+
+  /* Linguetta sul bordo sinistro della mappa: comprime / riapre il pannello sinistro. */
+  .edgetab {
+    position: absolute;
+    z-index: 25;
+    left: 0;
+    top: 12px;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 52px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 0 10px 10px 0;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .edgetab:hover {
+    color: var(--accent);
+  }
+
+  .layout[data-left='true'] .edgetab svg {
+    transform: rotate(180deg);
   }
 
   .view-head {
@@ -2501,6 +2569,8 @@ button:disabled {
   }
 
   .mapwrap {
+    grid-column: 2;
+    grid-row: 1;
     position: relative;
     inset: auto;
     min-height: 0;
@@ -2530,19 +2600,17 @@ button:disabled {
     display: block;
   }
 
-  /* Tablet: scheda sovrapposta alla mappa, a destra */
-  .sheet {
+  /* La scheda (sentiero, POI, zona) copre i filtri nello stesso pannello sinistro:
+     i filtri restano sotto, intatti, e ricompaiono con "← FILTRI". */
+  .side > .sheet {
     position: absolute;
-    z-index: 15;
-    left: auto;
-    top: 12px;
-    right: 68px;
-    bottom: 12px;
-    width: 380px;
+    z-index: 3;
+    inset: 0;
+    width: auto;
     max-height: none;
-    border-radius: var(--r-panel);
-    border: 1px solid var(--line);
-    box-shadow: var(--shadow);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .sheet.expanded {
@@ -2554,16 +2622,16 @@ button:disabled {
   }
 
   .sheet-top {
-    min-height: 0;
-    padding: 4px 4px 0;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 56px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line);
   }
 
-  .sheet-top .iconbtn {
-    position: absolute;
-    right: 4px;
-    top: 4px;
-    z-index: 2;
-    background: var(--panel);
+  .sheet-back {
+    align-items: center;
+    gap: 4px;
   }
 
   .sheet-body {
@@ -2572,7 +2640,47 @@ button:disabled {
 
   .sheet-foot {
     padding-bottom: 12px;
-    border-radius: 0 0 var(--r-panel) var(--r-panel);
+  }
+
+  .resizer {
+    display: block;
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .side > .resizer {
+    right: -5px;
+  }
+
+  .mine > .resizer {
+    left: -5px;
+  }
+
+  .resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 2px;
+    background: transparent;
+    transition: background 0.15s;
+  }
+
+  .resizer:hover::after,
+  .resizer.dragging::after {
+    background: var(--accent);
+  }
+
+  body.resizing,
+  body.resizing * {
+    cursor: col-resize !important;
+    user-select: none;
   }
 
   .toast {
@@ -2584,6 +2692,41 @@ button:disabled {
 @media (min-width: 768px) and (max-width: 1023px) {
   .brand {
     width: auto;
+  }
+
+  /* Un solo pannello alla volta, sovrapposto alla mappa (sinistra o destra). Niente maniglie. */
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mapwrap,
+  .side,
+  .mine {
+    grid-column: 1;
+  }
+
+  .side,
+  .mine {
+    z-index: 20;
+    width: min(380px, 85vw);
+    box-shadow: var(--shadow);
+  }
+
+  .side {
+    justify-self: start;
+    background: var(--panel);
+  }
+
+  .mine {
+    justify-self: end;
+  }
+
+  .resizer {
+    display: none;
+  }
+
+  .layout[data-left='true'] .edgetab {
+    left: min(380px, 85vw);
   }
 
   .brand-name {
@@ -2629,54 +2772,15 @@ button:disabled {
 }
 
 /* ==========================================================================
-   PC (≥ 1024): tre colonne — filtri | mappa | scheda
+   PC (≥ 1024): colonne — scoprire | mappa | le mie cose, ridimensionabili
    ========================================================================== */
 
 @media (min-width: 1024px) {
-  .desktop-wide-only {
-    display: block !important;
+  .layout[data-left='true'] {
+    --lw: clamp(280px, var(--left-w, 360px), 50vw);
   }
 
-  .layout {
-    grid-template-columns: 340px 1fr 380px;
-  }
-
-  .detail {
-    position: relative;
-    min-height: 0;
-    border-left: 1px solid var(--line);
-    background: var(--panel);
-  }
-
-  .detail-empty {
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    gap: 8px;
-    height: 100%;
-    padding: 24px;
-    text-align: center;
-    color: var(--muted);
-  }
-
-  .detail-empty svg {
-    color: var(--accent);
-  }
-
-  .detail-empty p {
-    margin: 0;
-  }
-
-  .detail .sheet {
-    position: absolute;
-    inset: 0;
-    width: auto;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  .detail .sheet-foot {
-    border-radius: 0;
+  .layout[data-right='true'] {
+    --rw: clamp(280px, var(--right-w, 380px), 50vw);
   }
 }

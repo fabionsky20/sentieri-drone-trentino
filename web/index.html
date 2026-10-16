@@ -70,7 +70,8 @@
     </header>
 
     <main class="layout">
-      <!-- Colonna sinistra (PC) / schermate intere (telefono): filtri, risultati, salvati. -->
+      <!-- Pannello sinistro (≥768) = scoprire: filtri, e sopra di essi la scheda di sentiero/POI/zona.
+           Telefono: schermate intere (tutte le viste, anche quelle del pannello destro). -->
       <aside id="side" class="side" data-view="filters">
         <section id="filters-view" class="view">
           <div class="view-head">
@@ -104,7 +105,7 @@
           <div class="view-head">
             <h2>Profilo</h2>
             <button type="button" id="profile-notifs" class="iconbtn bellbtn mobile-only" aria-label="Notifiche"><i data-icon="bell"></i><span id="profile-notif-count" class="count mono" hidden></span></button>
-            <button type="button" id="profile-close" class="iconbtn mobile-only" aria-label="Chiudi profilo"><i data-icon="close"></i></button>
+            <button type="button" id="profile-close" class="iconbtn" aria-label="Chiudi profilo"><i data-icon="close"></i></button>
           </div>
           <div class="view-body" id="profile-body"></div>
         </section>
@@ -121,6 +122,7 @@
           <div class="view-head">
             <button type="button" id="board-back" class="iconbtn" aria-label="Torna alle bacheche"><i data-icon="back"></i></button>
             <h2 id="board-title">Bacheca</h2>
+            <button type="button" id="board-close" class="iconbtn desktop-only" aria-label="Chiudi bacheca"><i data-icon="close"></i></button>
           </div>
           <div class="view-body" id="board-body"></div>
         </section>
@@ -128,14 +130,18 @@
         <section id="saved-view" class="view" hidden>
           <div class="view-head">
             <h2>Salvati</h2>
-            <button type="button" id="saved-close" class="iconbtn mobile-only" aria-label="Chiudi salvati"><i data-icon="close"></i></button>
+            <button type="button" id="saved-close" class="iconbtn" aria-label="Chiudi salvati"><i data-icon="close"></i></button>
           </div>
           <div class="view-body" id="saved-body"></div>
         </section>
+        <div id="left-resizer" class="resizer" role="separator" aria-orientation="vertical" aria-label="Larghezza del pannello sinistro" title="Trascina per ridimensionare · doppio clic: larghezza predefinita"></div>
       </aside>
 
       <div class="mapwrap">
         <div id="map" aria-label="Mappa dei sentieri"></div>
+
+        <!-- ≥768: linguetta per comprimere/riaprire il pannello sinistro -->
+        <button type="button" id="left-tab" class="edgetab" aria-label="Mostra i filtri" title="Mostra i filtri"><i data-icon="chevronRight" data-size="20"></i></button>
 
         <div class="maptools">
           <button type="button" id="basemap-btn" class="toolbtn" aria-pressed="false" title="Sfondo: pulita / topografica">
@@ -156,10 +162,11 @@
           <p class="legend-meta mono"><span id="trail-count"></span> · <span id="snapshot"></span></p>
         </div>
 
-        <!-- Scheda: bottom sheet su telefono, pannello sovrapposto su tablet. -->
+        <!-- Scheda: bottom sheet su telefono; su ≥768 main.ts la sposta nel pannello sinistro, sopra i filtri. -->
         <aside id="sheet" class="sheet" hidden>
           <div class="sheet-top">
             <button type="button" id="sheet-handle" class="handle" aria-label="Espandi o riduci la scheda"></button>
+            <button type="button" id="sheet-filters" class="btn-text sheet-back desktop-only"><i data-icon="back" data-size="18"></i>FILTRI</button>
             <button type="button" id="panel-close" class="iconbtn" aria-label="Chiudi"><i data-icon="close"></i></button>
           </div>
           <div id="panel-body" class="sheet-body"></div>
@@ -167,13 +174,9 @@
         </aside>
       </div>
 
-      <!-- Colonna destra (PC ≥1024): la stessa scheda viene spostata qui da main.ts. -->
-      <aside id="detail" class="detail desktop-wide-only">
-        <div id="detail-empty" class="detail-empty">
-          <i data-icon="map" data-size="28"></i>
-          <p class="section-label">Nessun sentiero selezionato</p>
-          <p class="muted">Tocca un sentiero sulla mappa o scegline uno dalla lista.</p>
-        </div>
+      <!-- Pannello destro (≥768) = le mie cose: salvati, bacheche, profilo, notifiche (spostati qui da main.ts). -->
+      <aside id="mine" class="mine">
+        <div id="right-resizer" class="resizer" role="separator" aria-orientation="vertical" aria-label="Larghezza del pannello destro" title="Trascina per ridimensionare · doppio clic: larghezza predefinita"></div>
       </aside>
     </main>
 
