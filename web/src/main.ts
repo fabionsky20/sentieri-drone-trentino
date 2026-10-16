@@ -7,10 +7,10 @@ import './style.css'
 
 import { attachToBasemap, FIRST_LABEL, FONT, LABEL_FONT, setBasemap, style, type Basemap } from './basemap'
 import { isClosedOn, type Closures } from './closures'
-import { activeCount, defaultFilters, matches, renderForm, type KmByColor } from './filters'
+import { activeCount, defaultFilters, matches, renderForm, segmented, type KmByColor } from './filters'
 import { effective, isActive, today, type Effective } from './flight'
 import { CATEGORIES, CATEGORY_ORDER, registerIcons } from './icons'
-import { badgeRow, catIcon, formatDate, h, kmVal, renderPoi, renderTrail, renderZones } from './panel'
+import { catIcon, dotDate, formatDate, h, renderPoi, renderTrail, renderZones, trailCard } from './panel'
 import { photosSection } from './photos'
 import { renderProfile } from './profile'
 import type { ListName, SavedState } from './saved'
@@ -29,17 +29,21 @@ import type {
   ValleyProps,
   ZoneProps,
 } from './types'
+import { hydrateIcons, icon } from './ui'
 
-const COLORS: Record<Colore, string> = { verde: '#1f9d55', giallo: '#e0a800', rosso: '#d62f2f' }
+/** Colori degli stati di volo (usati solo per il volo). */
+const COLORS: Record<Colore, string> = { verde: '#2FBF71', giallo: '#E9AE0B', rosso: '#E5484D' }
+const ACCENT = '#0B6E84'
 const TRENTINO: [number, number, number, number] = [10.45, 45.67, 11.97, 46.55]
 const SNAPSHOT_STALE_DAYS = 7
 const MAX_RESULTS_SHOWN = 150
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
-
-function mobile(): boolean {
-  return window.matchMedia('(max-width: 699px)').matches
-}
+const MQ_MOBILE = window.matchMedia('(max-width: 767px)')
+const MQ_WIDE = window.matchMedia('(min-width: 1024px)')
+const mobile = () => MQ_MOBILE.matches
+/** Conteggi con separatore delle migliaia anche a 4 cifre: "1.081". */
+const fmtCount = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
 
 /** Lettura/scrittura sicura di preferenze nel browser (può non essere disponibile). */
 function stored<T>(key: string, fallback: T): T {
@@ -58,8 +62,18 @@ function store(key: string, value: unknown): void {
   }
 }
 
-// Su telefono la legenda parte chiusa per lasciare spazio alla mappa.
-if (mobile()) $('legend').removeAttribute('open')
+hydrateIcons()
+
+// Avvisi brevi in basso (errori, posizione non disponibile…).
+let toastTimer = 0
+function showToast(msg: string, ms = 6000): void {
+  const t = $('status')
+  t.textContent = msg
+  t.hidden = false
+  clearTimeout(toastTimer)
+  if (ms) toastTimer = window.setTimeout(() => (t.hidden = true), ms)
+}
+
 
 // ---------------------------------------------------------------- mappa base
 
@@ -74,46 +88,12 @@ const map = new maplibregl.Map({
   attributionControl: { compact: true },
 })
 registerIcons(map)
-map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right')
-map.addControl(
-  new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }),
-  'top-right',
-)
+// La geolocalizzazione di MapLibre resta attiva ma nascosta: la comanda il pulsante della colonna strumenti.
+const geolocate = new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true })
+map.addControl(geolocate, 'top-right')
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right')
-
-/** Pulsanti "Pulita / Topo" sulla mappa; la scelta resta salvata nel browser. */
-class BasemapControl implements maplibregl.IControl {
-  private el = document.createElement('div')
-  onAdd(m: maplibregl.Map): HTMLElement {
-    this.el.className = 'maplibregl-ctrl maplibregl-ctrl-group basemap-switch'
-    this.el.setAttribute('role', 'group')
-    this.el.setAttribute('aria-label', 'Sfondo della mappa')
-    const options: [Basemap, string][] = [
-      ['pulita', 'Pulita'],
-      ['topo', 'Topo'],
-    ]
-    const buttons = options.map(([value, label]) => {
-      const b = document.createElement('button')
-      b.type = 'button'
-      b.textContent = label
-      b.title = value === 'pulita' ? 'Mappa pulita con rilievo' : 'Mappa topografica (OpenTopoMap)'
-      b.addEventListener('click', () => apply(value))
-      return [value, b] as const
-    })
-    const apply = (value: Basemap) => {
-      setBasemap(m, value)
-      for (const [v, b] of buttons) b.setAttribute('aria-pressed', String(v === value))
-      store('sfondo', value)
-    }
-    this.el.append(...buttons.map(([, b]) => b))
-    const saved = stored<string>('sfondo', 'pulita')
-    apply(saved === 'topo' ? 'topo' : 'pulita')
-    return this.el
-  }
-  onRemove(): void {
-    this.el.remove()
-  }
-}
+// La mappa cambia dimensione con il layout (colonne, schermate): va avvisata.
+new ResizeObserver(() => map.resize()).observe($('map'))
 
 // ---------------------------------------------------------------- dati
 
@@ -133,9 +113,12 @@ const [segments, zonesFC, trailList, meta, poisFC, valleysFC, closures] = await 
   load<Closures>('closures.json'),
   new Promise((resolve) => map.once('load', resolve)),
 ]).catch((err) => {
-  $('status').textContent = `Errore nel caricamento dei dati: ${err.message}`
+  showToast(`Errore nel caricamento dei dati: ${err.message}`, 0)
   throw err
 })
+$('status').hidden = true
+// Attribuzioni delle mappe: chiuse all'avvio (resta il pulsante ⓘ), così non coprono la legenda.
+map.once('idle', () => document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show'))
 
 // Profili e indice di ricerca servono solo quando si aprono: caricati alla prima richiesta.
 let profilesP: Promise<Record<string, Profile>> | null = null
@@ -184,6 +167,8 @@ const poiVisible = new Set<PoiCategory>(
     CATEGORY_ORDER.filter((c) => CATEGORIES[c].visible),
   ),
 )
+let zonesOn = false
+const kmOf = (id: string): KmByColor => trailKm.get(id) ?? { verde: 0, giallo: 0, rosso: 0 }
 
 // ---------------------------------------------------------------- layer
 
@@ -227,7 +212,7 @@ const valleyLabel = (id: string, principale: boolean, line: boolean, minzoom: nu
         'text-letter-spacing': principale ? 0.12 : 0.05,
         'text-transform': principale ? 'uppercase' : 'none',
       },
-      paint: { 'text-color': '#7a6a55', 'text-halo-color': 'rgba(255,255,255,0.85)', 'text-halo-width': 1.4 },
+      paint: { 'text-color': '#5E6B5F', 'text-halo-color': 'rgba(255,255,255,0.85)', 'text-halo-width': 1.4 },
     },
     FIRST_LABEL,
   )
@@ -236,7 +221,6 @@ valleyLabel('valley-major-point', true, false, 8, 12)
 valleyLabel('valley-minor-line', false, true, 11.5, 11)
 valleyLabel('valley-minor-point', false, false, 12, 11)
 attachToBasemap('pulita', ['valley-major-line', 'valley-major-point', 'valley-minor-line', 'valley-minor-point'])
-map.addControl(new BasemapControl(), 'top-right')
 
 // Zone e linee dei sentieri stanno sotto le etichette dello sfondo (FIRST_LABEL),
 // così nomi di paesi e vette restano leggibili.
@@ -274,7 +258,7 @@ map.addLayer(
     type: 'line',
     source: 'zones',
     filter: ['in', ['get', 'zona_id'], ['literal', []]],
-    paint: { 'line-color': '#1d4ed8', 'line-width': 3 },
+    paint: { 'line-color': ACCENT, 'line-width': 3 },
   },
   FIRST_LABEL,
 )
@@ -285,6 +269,7 @@ const ZOOMS = [8, 10, 12, 14, 17]
 const LINE_W = [1.5, 2.1, 3.2, 4.6, 7]
 const widths = (extra: number[] = [0, 0, 0, 0, 0]) => ZOOMS.flatMap((z, i) => [z, LINE_W[i] + extra[i]])
 const round = { 'line-cap': 'round', 'line-join': 'round' } as const
+// Alone del sentiero selezionato.
 map.addLayer(
   {
     id: 'seg-sel',
@@ -292,7 +277,7 @@ map.addLayer(
     source: 'segments',
     filter: ['==', ['get', 'sentiero_id'], ''],
     layout: round,
-    paint: { 'line-color': '#1d4ed8', 'line-width': byZoom(...widths([4, 5, 7, 8, 9])) },
+    paint: { 'line-color': ACCENT, 'line-opacity': 0.55, 'line-blur': 1, 'line-width': byZoom(...widths([7, 8, 10, 12, 14])) },
   },
   FIRST_LABEL,
 )
@@ -347,7 +332,7 @@ map.addLayer({
     'text-offset': [0, -1.1],
   },
   paint: {
-    'text-color': '#6b4e00',
+    'text-color': '#1A1400',
     'text-halo-color': '#ffffff',
     'text-halo-width': 1.8,
     'text-opacity': dimmed(1, 0.25),
@@ -361,14 +346,14 @@ map.addLayer({
   paint: { 'line-color': '#000', 'line-opacity': 0, 'line-width': 22 },
 })
 
-// POI: icone per categoria (attivabili dalla legenda), nome da vicino.
+// POI: icone per categoria (attivabili dal pannello Filtri), nome da vicino.
 const CAT_PRIORITY = ['rifugio', 'lago', 'malga', 'bivacco', 'cascata', 'passo', 'vetta', 'panoramico']
 map.addLayer({
   id: 'poi-sel',
   type: 'circle',
   source: 'pois',
   filter: ['==', ['get', 'id'], ''],
-  paint: { 'circle-radius': 15, 'circle-color': 'rgba(29,78,216,0.15)', 'circle-stroke-color': '#1d4ed8', 'circle-stroke-width': 2.5 },
+  paint: { 'circle-radius': 15, 'circle-color': 'rgba(11,110,132,0.15)', 'circle-stroke-color': ACCENT, 'circle-stroke-width': 2.5 },
 })
 map.addLayer({
   id: 'poi-icons',
@@ -388,11 +373,41 @@ map.addLayer({
     'text-optional': true,
     'text-max-width': 8,
   },
-  paint: { 'text-color': '#2b2f2c', 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 },
+  paint: { 'text-color': '#142024', 'text-halo-color': '#ffffff', 'text-halo-width': 1.4 },
 })
+
+// ---------------------------------------------------------------- strumenti mappa
+
+let basemap: Basemap = stored<string>('sfondo', 'pulita') === 'topo' ? 'topo' : 'pulita'
+function applyBasemap(): void {
+  setBasemap(map, basemap)
+  $('basemap-btn').setAttribute('aria-pressed', String(basemap === 'topo'))
+  $('basemap-label').textContent = basemap === 'topo' ? 'TOPO' : 'PUL'
+  store('sfondo', basemap)
+}
+applyBasemap()
+$('basemap-btn').addEventListener('click', () => {
+  basemap = basemap === 'pulita' ? 'topo' : 'pulita'
+  applyBasemap()
+})
+
+function setZones(on: boolean): void {
+  zonesOn = on
+  for (const id of ['zone-fill', 'zone-line']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none')
+  for (const id of ['zones-btn', 'toggle-zones', 'notam-chip']) $(id).setAttribute('aria-pressed', String(on))
+}
+for (const id of ['zones-btn', 'toggle-zones', 'notam-chip']) $(id).addEventListener('click', () => setZones(!zonesOn))
+
+$('locate-btn').addEventListener('click', () => geolocate.trigger())
+geolocate.on('geolocate', () => $('locate-btn').setAttribute('aria-pressed', 'true'))
+geolocate.on('trackuserlocationend', () => $('locate-btn').setAttribute('aria-pressed', 'false'))
+geolocate.on('error', () => showToast('Posizione non disponibile: controlla i permessi del browser.'))
+$('zoomin-btn').addEventListener('click', () => map.zoomIn())
+$('zoomout-btn').addEventListener('click', () => map.zoomOut())
 
 // ---------------------------------------------------------------- data scelta
 
+const dayInput = $<HTMLInputElement>('day')
 function applyDay(): void {
   eff = new Map()
   trailKm = new Map()
@@ -415,63 +430,102 @@ function applyDay(): void {
   closedIds = new Set(Object.entries(closures).filter(([, list]) => list.some((c) => isClosedOn(c, day))).map(([id]) => id))
 
   const notam = [...zones.values()].filter((z) => !z.permanente && z.sui_sentieri && isActive(z, day)).length
-  $('status').textContent = notam ? `${notam} NOTAM attivi sui sentieri in questa data` : ''
-  $('status').hidden = !notam
+  $('notam-chip').hidden = !notam
+  $('notam-label').textContent = `${notam} NOTAM`
+  $('notam-chip').title = `${notam} NOTAM attivi sui sentieri in questa data: tocca per vedere le zone`
+  $('day-label').textContent = dotDate(day)
   applyFilters() // il filtro "volo" dipende dalla data
   render()
 }
 
-const dayInput = $<HTMLInputElement>('day')
 dayInput.value = day
 dayInput.addEventListener('change', () => {
   if (!dayInput.value) return
   day = dayInput.value
   applyDay()
 })
-
-// ---------------------------------------------------------------- snapshot
-
-if (meta.snapshot) {
-  const snap = new Date(meta.snapshot)
-  const ageDays = (Date.now() - snap.getTime()) / 86_400_000
-  const el = $('snapshot')
-  el.textContent = `Zone D-Flight al ${formatDate(meta.snapshot)}`
-  if (ageDays > SNAPSHOT_STALE_DAYS) {
-    el.classList.add('stale')
-    el.textContent += ` (${Math.floor(ageDays)} giorni fa: aggiorna i dati)`
+// Su PC un clic sul chip apre direttamente il calendario.
+dayInput.addEventListener('click', () => {
+  try {
+    dayInput.showPicker()
+  } catch {
+    // showPicker non disponibile: resta il comportamento nativo
   }
-  el.title = 'I NOTAM pubblicati dopo questa data non sono inclusi.'
-}
-
-// ---------------------------------------------------------------- zone on/off
-
-const toggle = $<HTMLButtonElement>('toggle-zones')
-toggle.addEventListener('click', () => {
-  const on = toggle.getAttribute('aria-pressed') !== 'true'
-  toggle.setAttribute('aria-pressed', String(on))
-  for (const id of ['zone-fill', 'zone-line']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none')
 })
 
-// ---------------------------------------------------------------- POI on/off (legenda)
+// ---------------------------------------------------------------- legenda
 
-const poiToggles = $('poi-toggles')
-for (const c of CATEGORY_ORDER) {
-  const input = h('input', { type: 'checkbox' }) as HTMLInputElement
-  input.checked = poiVisible.has(c)
-  input.addEventListener('change', () => {
-    if (input.checked) poiVisible.add(c)
-    else poiVisible.delete(c)
-    map.setFilter('poi-icons', ['in', ['get', 'categoria'], ['literal', [...poiVisible]]])
-    store('poi-visibili', [...poiVisible])
-  })
-  poiToggles.append(h('label', { class: 'check' }, input, catIcon(c, 16), CATEGORIES[c].plural))
+$('trail-count').textContent = `${fmtCount(trailList.length)} sentieri SAT`
+if (meta.snapshot) {
+  const ageDays = (Date.now() - new Date(meta.snapshot).getTime()) / 86_400_000
+  const el = $('snapshot')
+  el.textContent = `D-Flight ${formatDate(meta.snapshot).replace(/\//g, '.').replace(',', '')}`
+  if (ageDays > SNAPSHOT_STALE_DAYS) {
+    el.classList.add('stale')
+    el.textContent += ` · ${Math.floor(ageDays)} gg fa: aggiorna`
+  }
+  el.title = 'Data dello snapshot delle zone D-Flight. I NOTAM pubblicati dopo non sono inclusi.'
 }
 
-// ---------------------------------------------------------------- pannello
+// ---------------------------------------------------------------- navigazione (telefono) e colonne (PC)
 
-const panel = $('panel')
+const side = $('side')
+type View = 'filters' | 'results' | 'saved'
+type Tab = 'map' | 'filters' | 'saved'
+
+function showView(view: View): void {
+  $('filters-view').hidden = view !== 'filters'
+  $('results-view').hidden = view !== 'results'
+  $('saved-view').hidden = view !== 'saved'
+  side.dataset.view = view
+  $('open-saved').setAttribute('aria-pressed', String(view === 'saved'))
+  if (view === 'saved') {
+    loadSaved()
+    renderSavedSheet()
+  }
+}
+
+/** Telefono: MAPPA chiude le schermate, FILTRI/SALVATI le aprono a tutto schermo. */
+function setTab(tab: Tab): void {
+  side.dataset.open = String(tab !== 'map')
+  if (tab !== 'map') {
+    select(null)
+    showView(tab)
+  }
+  for (const b of document.querySelectorAll<HTMLElement>('.tab')) {
+    if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page')
+    else b.removeAttribute('aria-current')
+  }
+}
+for (const b of document.querySelectorAll<HTMLElement>('.tab')) b.addEventListener('click', () => setTab(b.dataset.tab as Tab))
+$('open-filters').addEventListener('click', () => setTab('filters'))
+$('filters-close').addEventListener('click', () => setTab('map'))
+$('saved-close').addEventListener('click', () => setTab('map'))
+$('show-results').addEventListener('click', () => showView('results'))
+$('results-back').addEventListener('click', () => showView('filters'))
+$('results-map').addEventListener('click', () => setTab('map'))
+// PC: il pulsante SALVATI alterna Filtri e Salvati nella colonna sinistra.
+$('open-saved').addEventListener('click', () => showView(side.dataset.view === 'saved' ? 'filters' : 'saved'))
+showView('filters')
+
+// ---------------------------------------------------------------- scheda
+
+const sheet = $('sheet')
 const body = $('panel-body')
+const foot = $('panel-foot')
 const hoverMarker = new maplibregl.Marker({ element: h('div', { class: 'hover-dot' }) })
+
+/** Dove vive la scheda: PC largo → colonna destra; tablet → sopra la mappa;
+ *  telefono → in cima alla pagina, così copre anche barra in alto e navigazione. */
+function placeSheet(): void {
+  const target = MQ_WIDE.matches ? $('detail') : mobile() ? document.body : document.querySelector('.mapwrap')!
+  if (sheet.parentElement !== target) target.append(sheet)
+  sheet.classList.remove('expanded')
+}
+placeSheet()
+MQ_WIDE.addEventListener('change', placeSheet)
+MQ_MOBILE.addEventListener('change', placeSheet)
+$('sheet-handle').addEventListener('click', () => sheet.classList.toggle('expanded'))
 
 function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const line = trailLines.get(trail.id)
@@ -500,14 +554,12 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const photoPoints = line ? [0.2, 0.5, 0.8].map((f) => pointAt(line, f * line.length)) : []
   const back: Selection = { kind: 'trail', id: trail.id, seg: segId }
   const seg = segId ? segById.get(segId) : undefined
-  const saveBox = h('div', { class: 'savebox' })
-  currentSave = { trailId: trail.id, box: saveBox }
-  renderSaveBox()
+  currentSave = { trailId: trail.id, box: foot }
   return renderTrail({
     trail,
-    save: saveBox,
+    day,
     segment: seg ? { seg, eff: eff.get(seg.id)! } : undefined,
-    trailKm: trailKm.get(trail.id)!,
+    trailKm: kmOf(trail.id),
     closures: {
       all: closures[trail.id] ?? [],
       active: (closures[trail.id] ?? []).filter((c) => isClosedOn(c, day)),
@@ -529,34 +581,50 @@ function render(): void {
   map.setFilter('zone-sel', ['in', ['get', 'zona_id'], ['literal', selection?.kind === 'zones' ? selection.ids : []]])
   map.setFilter('poi-sel', ['==', ['get', 'id'], selection?.kind === 'poi' ? selection.id : ''])
   if (!selection) {
-    panel.hidden = true
+    sheet.hidden = true
+    $('detail-empty').hidden = false
+    currentSave = null
     return
   }
   body.replaceChildren()
   const s = selection
   if (s.kind === 'trail') {
     body.append(trailPanel(trails.get(s.id)!, s.seg))
-  } else if (s.kind === 'zones') {
-    const list = s.ids.map((id) => zones.get(id)).filter((z): z is ZoneProps => !!z)
-    body.append(renderZones(sortZones(list), s.back ? () => select(s.back!) : undefined))
   } else {
-    const poi = pois.get(s.id)!
-    body.append(
-      renderPoi({
-        poi,
-        near: (poiTrails.get(poi.id) ?? []).sort((a, b) => a.d - b.d),
-        photos: photosSection([poiCoord.get(poi.id)!], 400),
-        onTrail: (id) => {
-          select({ kind: 'trail', id })
-          fitTrail(trails.get(id)!)
-        },
-        onBack: s.back ? () => select(s.back!) : undefined,
-      }),
-    )
+    currentSave = null
+    if (s.kind === 'zones') {
+      const list = s.ids.map((id) => zones.get(id)).filter((z): z is ZoneProps => !!z)
+      body.append(renderZones(sortZones(list), s.back ? () => select(s.back!) : undefined))
+    } else {
+      const poi = pois.get(s.id)!
+      body.append(
+        renderPoi({
+          poi,
+          near: (poiTrails.get(poi.id) ?? []).sort((a, b) => a.d - b.d),
+          photos: photosSection([poiCoord.get(poi.id)!], 400),
+          onTrail: (id) => {
+            select({ kind: 'trail', id })
+            fitTrail(trails.get(id)!)
+          },
+          onBack: s.back ? () => select(s.back!) : undefined,
+        }),
+      )
+    }
   }
-  panel.hidden = false
-  panel.scrollTop = 0
-  if (mobile()) closeFilters() // su telefono un solo foglio alla volta
+  renderSaveBox()
+  sheet.hidden = false
+  $('detail-empty').hidden = true
+  body.scrollTop = 0
+  if (mobile()) setTabSilently('map') // su telefono la scheda sta sopra la mappa
+}
+
+/** Torna alla mappa senza deselezionare (usato quando si apre una scheda da una lista). */
+function setTabSilently(tab: Tab): void {
+  side.dataset.open = String(tab !== 'map')
+  for (const b of document.querySelectorAll<HTMLElement>('.tab')) {
+    if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page')
+    else b.removeAttribute('aria-current')
+  }
 }
 
 function select(s: Selection): void {
@@ -574,34 +642,21 @@ function sortZones(list: ZoneProps[]): ZoneProps[] {
   return [...list].sort((a, b) => rank(a) - rank(b))
 }
 
-const fitPadding = () =>
-  mobile()
-    ? { top: 70, left: 30, right: 30, bottom: Math.round(window.innerHeight * 0.5) }
-    : { top: 80, left: filtersOpen() ? 400 : 40, right: 440, bottom: 40 }
+function fitPadding(): maplibregl.PaddingOptions {
+  if (mobile()) return { top: 150, left: 30, right: 70, bottom: Math.round(window.innerHeight * 0.55) }
+  if (!MQ_WIDE.matches && !sheet.hidden) return { top: 40, left: 40, right: 420, bottom: 40 }
+  return { top: 40, left: 40, right: 70, bottom: 40 }
+}
 
 $('panel-close').addEventListener('click', () => select(null))
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return
-  if (!$('search').hidden) closeSearch()
+  if (!searchList.hidden) closeSearch()
   else select(null)
 })
 
 // ---------------------------------------------------------------- filtri
 
-const filtersEl = $('filters')
-const filtersOpen = () => !filtersEl.hidden
-
-function openFilters(): void {
-  filtersEl.hidden = false
-  $('legend').hidden = !mobile() // su PC il pannello filtri prende il posto della legenda
-  if (mobile()) select(null)
-}
-function closeFilters(): void {
-  filtersEl.hidden = true
-  $('legend').hidden = false
-}
-$('open-filters').addEventListener('click', () => (filtersOpen() ? closeFilters() : openFilters()))
-$('filters-close').addEventListener('click', closeFilters)
 $('filters-reset').addEventListener('click', () => {
   Object.assign(filters, defaultFilters())
   drawForm()
@@ -612,13 +667,43 @@ function drawForm(): void {
   $('filters-form').replaceChildren(renderForm(filters, gruppi, applyFilters))
 }
 
+/** Punti sulla mappa (icone per categoria): stanno nel pannello Filtri. */
+function drawPoiToggles(): void {
+  const wrap = h('div', { class: 'chipgrid' })
+  for (const c of CATEGORY_ORDER) {
+    const b = h('button', { type: 'button', class: 'chiptoggle', 'aria-pressed': String(poiVisible.has(c)) }, catIcon(c, 16), CATEGORIES[c].plural)
+    b.addEventListener('click', () => {
+      if (poiVisible.has(c)) poiVisible.delete(c)
+      else poiVisible.add(c)
+      b.setAttribute('aria-pressed', String(poiVisible.has(c)))
+      map.setFilter('poi-icons', ['in', ['get', 'categoria'], ['literal', [...poiVisible]]])
+      store('poi-visibili', [...poiVisible])
+    })
+    wrap.append(b)
+  }
+  $('poi-section').replaceChildren(h('section', {}, h('p', { class: 'section-label' }, 'Punti sulla mappa'), wrap))
+}
+
+function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void } = {}): HTMLElement {
+  return trailCard(t, {
+    km: kmOf(t.id),
+    closed: closedIds.has(t.id),
+    saved: !!(saved?.miei.has(t.id) || saved?.condivisi.has(t.id)),
+    ...extra,
+    onOpen: () => {
+      select({ kind: 'trail', id: t.id })
+      fitTrail(t)
+    },
+  })
+}
+
 function applyFilters(): void {
   const active = activeCount(filters)
   const ok = new Set<string>()
   const results: Trail[] = []
   for (const t of trailList) {
     const ctx = {
-      km: trailKm.get(t.id) ?? { verde: 0, giallo: 0, rosso: 0 },
+      km: kmOf(t.id),
       closed: closedIds.has(t.id),
       mine: saved?.miei.has(t.id) ?? false,
       shared: saved?.condivisi.has(t.id) ?? false,
@@ -632,80 +717,58 @@ function applyFilters(): void {
     map.setFeatureState({ source: 'segments', id: f.properties.id }, { off: active > 0 && !ok.has(f.properties.sentiero_id) })
   }
 
-  const count = $('filter-count')
-  count.hidden = active === 0
-  count.textContent = String(active)
+  for (const id of ['filter-count', 'tab-count']) {
+    $(id).hidden = active === 0
+    $(id).textContent = String(active)
+  }
 
   // Prima i più volabili nella data scelta (km verdi, poi gialli).
-  const km = (t: Trail) => trailKm.get(t.id) ?? { verde: 0, giallo: 0, rosso: 0 }
-  results.sort((a, b) => km(b).verde - km(a).verde || km(b).giallo - km(a).giallo)
+  results.sort((a, b) => kmOf(b.id).verde - kmOf(a.id).verde || kmOf(b.id).giallo - kmOf(a.id).giallo)
+  const n = fmtCount(results.length)
   $('filters-summary').textContent =
-    active === 0
-      ? `${results.length} sentieri (nessun filtro attivo)`
-      : `${results.length} sentieri su ${trailList.length}` + (results.length > MAX_RESULTS_SHOWN ? `, mostrati i primi ${MAX_RESULTS_SHOWN}` : '')
-  const list = $('filters-results')
-  list.replaceChildren()
-  for (const t of results.slice(0, MAX_RESULTS_SHOWN)) {
-    const k = km(t)
-    const meta = [
-      closedIds.has(t.id) ? 'CHIUSO' : null,
-      saved?.miei.has(t.id) || saved?.condivisi.has(t.id) ? '★ salvato' : null,
-      kmVal((t.lunghezza_m ?? 0) / 1000),
-      t.dislivello_pos != null ? `+${t.dislivello_pos} m` : null,
-      t.difficolta,
-      `verde ${kmVal(k.verde)}`,
-    ].filter(Boolean)
-    const btn = h(
-      'button',
-      { type: 'button' },
-      h('span', { class: 'r-title' }, `${t.numero} · ${t.titolo}`),
-      h('span', { class: 'r-meta' }, meta.join(' · ')),
-      t.badge.length ? badgeRow(t.badge) : null,
-    )
-    btn.addEventListener('click', () => {
-      select({ kind: 'trail', id: t.id })
-      fitTrail(t)
-    })
-    list.append(h('li', {}, btn))
-  }
+    (active === 0 ? `${n} sentieri · nessun filtro` : `${n} di ${fmtCount(trailList.length)} sentieri`) +
+    (results.length > MAX_RESULTS_SHOWN ? ` · primi ${MAX_RESULTS_SHOWN}` : '')
+  $('show-results').textContent = `MOSTRA ${n} SENTIERI`
+  $('results-title').textContent = `${n} sentieri`
+  const shown = results.slice(0, MAX_RESULTS_SHOWN)
+  $('filters-results').replaceChildren(...shown.map((t) => cardFor(t)))
+  $('results-list').replaceChildren(...shown.map((t) => cardFor(t)))
 }
 drawForm()
+drawPoiToggles()
 
 // ---------------------------------------------------------------- ricerca
 
-const searchEl = $('search')
 const searchInput = $<HTMLInputElement>('search-input')
 const searchList = $('search-results')
 const KIND_LABEL: Record<string, string> = { sentiero: 'Sentiero', paese: 'Località', valle: 'Valle' }
 
-function openSearch(): void {
-  searchEl.hidden = false
-  searchInput.focus()
-  searchInput.select()
-  getSearch().catch(() => {
-    searchList.replaceChildren(h('li', { class: 'muted' }, 'Indice di ricerca non disponibile.'))
-  })
-}
 function closeSearch(): void {
-  searchEl.hidden = true
+  searchList.hidden = true
 }
-$('open-search').addEventListener('click', openSearch)
-$('search-close').addEventListener('click', closeSearch)
+searchInput.addEventListener('focus', () => {
+  getSearch().catch(() => showToast('Indice di ricerca non disponibile.'))
+  if (searchInput.value.trim()) searchList.hidden = false
+})
+document.addEventListener('pointerdown', (e) => {
+  if (!(e.target as HTMLElement).closest('.searchwrap')) closeSearch()
+})
 
 let lastResults: SearchItem[] = []
 searchInput.addEventListener('input', async () => {
   const items = await getSearch()
   lastResults = rank(items, searchInput.value)
   searchList.replaceChildren()
-  if (searchInput.value.trim() && !lastResults.length) searchList.append(h('li', { class: 'muted' }, 'Nessun risultato'))
+  searchList.hidden = !searchInput.value.trim()
+  if (searchInput.value.trim() && !lastResults.length) searchList.append(h('li', { class: 'muted empty' }, 'Nessun risultato'))
   for (const it of lastResults) {
     const cat = it.t in CATEGORIES ? (it.t as PoiCategory) : null
     const btn = h(
       'button',
       { type: 'button' },
-      cat ? catIcon(cat, 16) : h('span', { class: 'kind-dot' }),
-      h('span', { class: 'r-title' }, it.n),
-      h('span', { class: 'r-meta' }, cat ? CATEGORIES[cat].label : (KIND_LABEL[it.t] ?? it.t)),
+      cat ? catIcon(cat, 18) : h('span', { class: `kind ${it.t}` }, icon(it.t === 'sentiero' ? 'map' : 'locate', 16)),
+      h('span', { class: 'sr-title' }, it.n),
+      h('span', { class: 'sr-kind' }, cat ? CATEGORIES[cat].label : (KIND_LABEL[it.t] ?? it.t)),
     )
     btn.addEventListener('click', () => pick(it))
     searchList.append(h('li', {}, btn))
@@ -717,6 +780,7 @@ searchInput.addEventListener('keydown', (e) => {
 
 function pick(it: SearchItem): void {
   closeSearch()
+  searchInput.blur()
   if (it.t === 'sentiero' && it.id && trails.has(it.id)) {
     select({ kind: 'trail', id: it.id })
     fitTrail(trails.get(it.id)!)
@@ -726,8 +790,8 @@ function pick(it: SearchItem): void {
     if (!poiVisible.has(cat)) {
       poiVisible.add(cat)
       map.setFilter('poi-icons', ['in', ['get', 'categoria'], ['literal', [...poiVisible]]])
-      const box = [...poiToggles.querySelectorAll('input')][CATEGORY_ORDER.indexOf(cat)]
-      if (box) box.checked = true
+      store('poi-visibili', [...poiVisible])
+      drawPoiToggles()
     }
     select({ kind: 'poi', id: it.id })
     map.flyTo({ center: it.c, zoom: 14, padding: fitPadding() })
@@ -759,7 +823,7 @@ map.on('click', (e) => {
     revealAbovePanel(e.point)
     return
   }
-  if (map.getLayoutProperty('zone-fill', 'visibility') === 'visible') {
+  if (zonesOn) {
     const ids = [...new Set(map.queryRenderedFeatures(e.point, { layers: ['zone-fill'] }).map((f) => f.properties.zona_id as string))]
     if (ids.length) {
       select({ kind: 'zones', ids })
@@ -769,11 +833,11 @@ map.on('click', (e) => {
   select(null)
 })
 
-/** Su telefono il pannello copre metà schermo: sposta la mappa così il punto toccato resta visibile. */
+/** Su telefono la scheda copre metà schermo: sposta la mappa così il punto toccato resta visibile. */
 function revealAbovePanel(point: maplibregl.Point): void {
   if (!mobile()) return
   const h = map.getContainer().clientHeight
-  const visible = h - panel.offsetHeight
+  const visible = h - sheet.offsetHeight
   if (point.y > visible - 40) map.panBy([0, point.y - visible / 2])
 }
 
@@ -813,6 +877,7 @@ for (const layer of ['seg-hit', 'zone-fill', 'poi-icons']) {
 let saved: SavedState | null = null
 let savedModule: Promise<typeof import('./saved')> | null = null
 let currentSave: { trailId: string; box: HTMLElement } | null = null
+let savedTab: ListName = 'miei'
 
 function loadSaved(): Promise<typeof import('./saved')> {
   if (!savedModule) {
@@ -829,36 +894,15 @@ function loadSaved(): Promise<typeof import('./saved')> {
       )
       .catch((e) => {
         savedModule = null
-        showSavedError(`Impossibile caricare il servizio dei salvati: ${e.message}`)
+        showToast(`Impossibile caricare il servizio dei salvati: ${e.message}`)
       })
   }
   return savedModule
 }
 
-const savedEl = $('saved')
-const savedBody = $('saved-body')
-
 function openSaved(): void {
-  closeFilters()
-  savedEl.hidden = false
-  $('legend').hidden = !mobile()
-  if (mobile()) select(null)
-  loadSaved()
-  renderSavedSheet()
-}
-function closeSaved(): void {
-  savedEl.hidden = true
-  $('legend').hidden = filtersOpen() && !mobile()
-}
-$('open-saved').addEventListener('click', () => (savedEl.hidden ? openSaved() : closeSaved()))
-$('saved-close').addEventListener('click', closeSaved)
-$('open-filters').addEventListener('click', closeSaved)
-
-function showSavedError(msg: string): void {
-  const status = $('status')
-  status.textContent = msg
-  status.hidden = false
-  setTimeout(() => applyDay(), 6000) // poi torna l'avviso dei NOTAM
+  if (mobile()) setTab('saved')
+  else showView('saved')
 }
 
 async function doLogin(): Promise<void> {
@@ -868,7 +912,7 @@ async function doLogin(): Promise<void> {
   } catch (e) {
     const code = (e as { code?: string }).code ?? ''
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') return
-    showSavedError(
+    showToast(
       code === 'auth/popup-blocked'
         ? 'Il browser ha bloccato la finestra di accesso: consenti i popup per questo sito.'
         : `Accesso non riuscito (${code || (e as Error).message}).`,
@@ -886,108 +930,109 @@ async function toggleSaved(list: ListName, trailId: string): Promise<void> {
   try {
     await (has ? m.remove(list, trailId) : m.save(list, trailId))
   } catch (e) {
-    showSavedError(`Salvataggio non riuscito: ${(e as Error).message}`)
+    showToast(`Salvataggio non riuscito: ${(e as Error).message}`)
   }
 }
 
-/** Pulsanti "Salva" nella scheda del sentiero. */
+/** Pulsanti fissi in fondo alla scheda: SALVA NEI MIEI (pieno) e CONDIVISI (bordo). */
 function renderSaveBox(): void {
-  if (!currentSave) return
-  const { trailId, box } = currentSave
-  const button = (list: ListName, label: string) => {
-    const on = list === 'miei' ? saved?.miei.has(trailId) : saved?.condivisi.has(trailId)
-    const b = h('button', { type: 'button', class: 'savebtn', 'aria-pressed': String(!!on) }, `${on ? '★' : '☆'} ${label}`)
-    b.addEventListener('click', () => toggleSaved(list, trailId))
-    return b
+  if (!currentSave) {
+    foot.hidden = true
+    foot.replaceChildren()
+    return
   }
-  box.replaceChildren(button('miei', 'Miei'), button('condivisi', 'Condivisi'))
-}
-
-function savedList(entries: [string, { aggiunto: Date | null; da?: string }][], list: ListName): HTMLElement {
-  const known = entries.filter(([id]) => trails.has(id))
-  if (!known.length) {
-    return h(
-      'p',
-      { class: 'muted small' },
-      list === 'miei' ? 'Nessun sentiero salvato: usa "☆ Miei" nella scheda di un sentiero.' : 'La lista condivisa è vuota.',
-    )
-  }
-  const ul = h('ul', { class: 'results' })
-  known.sort((a, b) => (b[1].aggiunto?.getTime() ?? 0) - (a[1].aggiunto?.getTime() ?? 0))
-  for (const [id, info] of known) {
-    const t = trails.get(id)!
-    const who = info.da ? `aggiunto da ${saved?.membri.get(info.da) ?? 'un membro'}` : null
-    const open = h(
-      'button',
-      { type: 'button' },
-      h('span', { class: 'r-title' }, `${t.numero} · ${t.titolo}`),
-      h('span', { class: 'r-meta' }, [kmVal((t.lunghezza_m ?? 0) / 1000), closedIds.has(id) ? 'CHIUSO' : null, who].filter(Boolean).join(' · ')),
-    )
-    open.addEventListener('click', () => {
-      if (mobile()) closeSaved()
-      select({ kind: 'trail', id })
-      fitTrail(t)
-    })
-    const del = h('button', { type: 'button', class: 'remove', 'aria-label': `Togli ${t.numero} dalla lista`, title: 'Togli dalla lista' }, '×')
-    del.addEventListener('click', () => toggleSaved(list, id))
-    ul.append(h('li', { class: 'saved-item' }, open, del))
-  }
-  return ul
+  const { trailId } = currentSave
+  const mine = !!saved?.miei.has(trailId)
+  const shared = !!saved?.condivisi.has(trailId)
+  const b1 = h('button', { type: 'button', class: 'btn-primary', 'aria-pressed': String(mine) }, icon(mine ? 'bookmarkFilled' : 'bookmark', 18), mine ? 'NEI MIEI' : 'SALVA NEI MIEI')
+  const b2 = h('button', { type: 'button', class: 'btn-outline', 'aria-pressed': String(shared) }, icon(shared ? 'bookmarkFilled' : 'bookmark', 18), shared ? 'IN CONDIVISI' : 'CONDIVISI')
+  b1.addEventListener('click', () => toggleSaved('miei', trailId))
+  b2.addEventListener('click', () => toggleSaved('condivisi', trailId))
+  foot.replaceChildren(b1, b2)
+  foot.hidden = false
 }
 
 /** Contenuto della sezione "Salvati" secondo lo stato del login. */
 function renderSavedSheet(): void {
-  if (savedEl.hidden) return
+  if ($('saved-view').hidden) return
   const st = saved
   const parts: HTMLElement[] = []
   const retry = () => {
-    const b = h('button', { type: 'button', class: 'primary' }, 'Riprova')
+    const b = h('button', { type: 'button', class: 'btn-primary' }, 'RIPROVA')
     b.addEventListener('click', () => loadSaved().then((m) => m.retry()))
     return b
   }
   if (!st || st.status === 'caricamento') {
     parts.push(h('p', { class: 'muted' }, 'Caricamento…'))
   } else if (st.status === 'anonimo') {
-    const b = h('button', { type: 'button', class: 'primary' }, 'Accedi con Google')
+    const b = h('button', { type: 'button', class: 'btn-primary wide' }, 'ACCEDI CON GOOGLE')
     b.addEventListener('click', doLogin)
     parts.push(
-      h('p', {}, "Accedi per salvare i sentieri e ritrovarli sincronizzati su telefono e PC. L'accesso resta attivo: non serve rifarlo ogni volta."),
+      h('div', { class: 'empty-state' }, icon('bookmark', 28), h('p', {}, "Accedi per salvare i sentieri e ritrovarli sincronizzati su telefono e PC. L'accesso resta attivo: non serve rifarlo ogni volta.")),
       b,
     )
   } else if (st.status === 'non-membro') {
     const uid = st.user?.uid ?? ''
-    const copy = h('button', { type: 'button', class: 'link' }, 'Copia')
+    const copy = h('button', { type: 'button', class: 'btn-text' }, 'COPIA')
     copy.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(uid)
-        copy.textContent = 'Copiato'
+        copy.textContent = 'COPIATO'
       } catch {
-        copy.textContent = 'Selezionalo e copialo a mano'
+        copy.textContent = 'COPIA A MANO'
       }
     })
     parts.push(
       h('p', {}, `Accesso fatto come ${st.user?.nome ?? st.user?.email ?? 'utente Google'}, ma questo account non è ancora tra i membri dell'app.`),
-      h('p', { class: 'small' }, 'Il tuo ID utente, da aggiungere ai membri:'),
-      h('p', { class: 'uid' }, h('code', {}, uid), ' ', copy),
+      h('p', { class: 'section-label' }, 'Il tuo ID utente, da aggiungere ai membri'),
+      h('div', { class: 'uid' }, h('code', { class: 'mono' }, uid), copy),
       retry(),
     )
   } else if (st.status === 'errore') {
     parts.push(h('p', { class: 'warn' }, `Errore: ${st.errore}`), retry())
   } else {
-    parts.push(
-      h('h3', {}, `I miei (${st.miei.size})`),
-      savedList([...st.miei], 'miei'),
-      h('h3', {}, `Condivisi (${st.condivisi.size})`),
-      h('p', { class: 'muted small' }, `Lista comune a tutti i membri: ${[...st.membri.values()].join(', ')}.`),
-      savedList([...st.condivisi], 'condivisi'),
+    const seg = segmented<ListName>(
+      [
+        ['miei', `I miei · ${st.miei.size}`],
+        ['condivisi', `Condivisi · ${st.condivisi.size}`],
+      ],
+      savedTab,
+      (v) => {
+        savedTab = v
+        renderSavedSheet()
+      },
     )
+    const entries = savedTab === 'miei' ? [...st.miei] : [...st.condivisi]
+    const known = entries.filter(([id]) => trails.has(id))
+    known.sort((a, b) => (b[1].aggiunto?.getTime() ?? 0) - (a[1].aggiunto?.getTime() ?? 0))
+    parts.push(seg)
+    if (savedTab === 'condivisi') {
+      parts.push(h('p', { class: 'hint' }, `Lista comune a tutti i membri: ${[...st.membri.values()].join(', ')}.`))
+    }
+    if (!known.length) {
+      parts.push(
+        h('p', { class: 'muted empty-list' }, savedTab === 'miei' ? 'Nessun sentiero salvato: usa "Salva nei miei" nella scheda di un sentiero.' : 'La lista condivisa è vuota.'),
+      )
+    } else {
+      const list = h('ul', { class: 'cards' })
+      for (const [id, info] of known) {
+        const da = 'da' in info ? (info as { da: string }).da : null
+        list.append(
+          cardFor(trails.get(id)!, {
+            who: da ? `aggiunto da ${st.membri.get(da) ?? 'un membro'}` : null,
+            onRemove: () => toggleSaved(savedTab, id),
+          }),
+        )
+      }
+      parts.push(list)
+    }
   }
   if (st?.user) {
-    const out = h('button', { type: 'button', class: 'link' }, 'Esci')
+    const out = h('button', { type: 'button', class: 'btn-text' }, 'ESCI')
     out.addEventListener('click', () => loadSaved().then((m) => m.logout()))
-    parts.push(h('p', { class: 'muted small account' }, `Account: ${st.user.nome ?? ''}${st.user.email ? ` (${st.user.email})` : ''} · `, out))
+    parts.push(h('div', { class: 'account' }, h('span', { class: 'muted small' }, `${st.user.nome ?? ''}${st.user.email ? ` · ${st.user.email}` : ''}`), out))
   }
-  savedBody.replaceChildren(...parts)
+  $('saved-body').replaceChildren(...parts)
 }
 
 if (stored('salvati-attivo', false)) loadSaved()

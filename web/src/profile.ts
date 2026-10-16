@@ -54,9 +54,9 @@ export function renderProfile(input: ProfileInput): HTMLElement {
     c.clearRect(0, 0, width, HEIGHT)
 
     // Griglia e quote sull'asse verticale.
-    c.font = '11px system-ui, sans-serif'
-    c.fillStyle = '#5f6b65'
-    c.strokeStyle = '#e3e7e4'
+    c.font = "500 11px 'IBM Plex Mono', ui-monospace, monospace"
+    c.fillStyle = '#4F5C59'
+    c.strokeStyle = '#D3D9D3'
     c.lineWidth = 1
     c.textAlign = 'right'
     c.textBaseline = 'middle'

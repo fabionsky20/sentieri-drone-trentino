@@ -117,4 +117,14 @@ docs/            documentazione (DATA.md, ...)
   - `web/src/saved.ts` caricato solo quando serve (import dinamico; subito all'avvio se il dispositivo aveva già fatto login, flag `salvati-attivo`). Login con popup (non redirect: il sito non è ospitato su Firebase).
   - Membri in `membri/{uid}`, aggiunti a mano dalla console: guida in `docs/SALVATI.md`. Regole in `firestore.rules` (copia di riferimento: vanno pubblicate dalla console). Mai email o dati personali nel repo.
   - Gli avvisi "Cross-Origin-Opener-Policy … window.closed" in console durante il login con popup sono noti e innocui.
-- Fasi successive da pianificare (PWA offline, meteo, design finale).
+- **Fase 6** ✅ redesign grafico (solo estetica e layout). Regole in "Design" qui sotto.
+- Fasi successive da pianificare (PWA offline, meteo).
+
+## Design (fase 6)
+
+- Stile "strumento di volo outdoor", tema unico chiaro. Variabili CSS su `:root` in `web/src/style.css`: `--bg #EEF0EC`, `--panel #FFF`, `--panel2 #F2F4F1`, `--line #D3D9D3`, `--ink #142024`, `--muted #4F5C59`, `--accent #0B6E84` (unico colore per elementi interattivi/attivi), `--glass`. Stati di volo SOLO per il volo: verde `#2FBF71`, giallo `#E9AE0B` (testo `#1A1400`), rosso `#E5484D`; lago `#5FA8C9`.
+- **Contrasto:** testo bianco o scuro su verde/rosso non arriva a 4,5:1 → verde e rosso solo come pallini, barre e bordi, testo sempre scuro su fondo chiaro. Il giallo può essere pieno.
+- Font Google: IBM Plex Sans (testo), Plex Sans Condensed 600/700 (titoli, pulsanti in maiuscolo con spaziatura .06em), Plex Mono 500/600 (tutti i dati e le etichette di sezione, classe `.mono` / `.section-label`). Le etichette sulla mappa restano Noto Sans (font di OpenFreeMap).
+- Layout: telefono < 768 (barra in alto galleggiante, colonna strumenti, legenda a striscia, tabbar MAPPA/FILTRI/SALVATI, scheda bottom sheet spostata in `body`); tablet 768–1023 (header + colonna sinistra, scheda sovrapposta alla mappa); PC ≥ 1024 (tre colonne: filtri+risultati | mappa | scheda in `#detail`). `placeSheet()` in `main.ts` sposta la scheda.
+- Su telefono `.layout` non deve creare un contesto di sovrapposizione (niente `position: fixed` su di esso), altrimenti scheda e schermate finiscono sotto barra in alto e tabbar. Su ≥ 768 `.side` torna a `z-index: auto`.
+- Icone SVG a tratto in `web/src/ui.ts` (niente emoji). Target touch ≥ 44 px.

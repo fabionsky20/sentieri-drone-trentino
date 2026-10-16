@@ -3,80 +3,151 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#1f3a2e" />
+    <meta name="theme-color" content="#FFFFFF" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f3a2e'/%3E%3Cpath d='M4 25 13 10l5 8 3-4 7 11z' fill='%23fff'/%3E%3Cpath d='M4 25 13 10l3 5' stroke='%231f9d55' stroke-width='2.5' fill='none'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B6E84'/%3E%3Cpath d='M5 24 13 11l4.5 7 3-4.5L27 24z' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
     />
     <title>Sentieri &amp; Drone</title>
   </head>
   <body>
-    <header class="bar">
-      <span class="brand">Sentieri &amp; Drone</span>
-      <button type="button" id="open-search" class="iconbtn" aria-label="Cerca" title="Cerca">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>
-      </button>
-      <button type="button" id="open-filters" class="iconbtn" aria-label="Filtri" title="Filtri">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z" /></svg>
-        <span id="filter-count" class="count" hidden></span>
-      </button>
-      <button type="button" id="open-saved" class="iconbtn" aria-label="Salvati" title="Sentieri salvati">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z" /></svg>
-      </button>
-      <label class="day">
-        <span>Volo il</span>
-        <input type="date" id="day" required />
-      </label>
-      <button type="button" id="toggle-zones" class="toggle" aria-pressed="false">Zone</button>
+    <!-- Barra superiore: su PC è l'header; su telefono galleggia sopra la mappa (ricerca + chip). -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"><i data-icon="drone" data-size="20"></i></span>
+        <span class="brand-name">Sentieri <span>&amp;</span> Drone</span>
+      </div>
+
+      <div class="searchwrap">
+        <label class="searchbar">
+          <i data-icon="search" data-size="20"></i>
+          <input type="search" id="search-input" placeholder="Sentiero, vetta, lago, rifugio, passo…" autocomplete="off" enterkeyhint="search" aria-label="Cerca" />
+        </label>
+        <button type="button" id="open-filters" class="squarebtn mobile-only" aria-label="Filtri">
+          <i data-icon="filter"></i>
+          <span id="filter-count" class="count mono" hidden></span>
+        </button>
+        <ul id="search-results" class="search-results" hidden></ul>
+      </div>
+
+      <div class="chips">
+        <label class="chip datechip" title="Data del volo: applica NOTAM e chiusure">
+          <i data-icon="calendar" data-size="16"></i>
+          <span class="chip-k">VOLO</span>
+          <span id="day-label" class="mono"></span>
+          <input type="date" id="day" required aria-label="Data del volo" />
+        </label>
+        <button type="button" id="notam-chip" class="chip notamchip" hidden title="Mostra le zone D-Flight">
+          <i class="dot rosso"></i><span id="notam-label" class="mono"></span>
+        </button>
+      </div>
+
+      <div class="topactions desktop-only">
+        <button type="button" id="toggle-zones" class="btn-outline" aria-pressed="false">
+          <i data-icon="shield" data-size="18"></i><span>ZONE</span>
+        </button>
+        <button type="button" id="open-saved" class="btn-outline" aria-pressed="false">
+          <i data-icon="bookmark" data-size="18"></i><span>SALVATI</span>
+        </button>
+      </div>
     </header>
 
-    <div id="map" aria-label="Mappa dei sentieri"></div>
+    <main class="layout">
+      <!-- Colonna sinistra (PC) / schermate intere (telefono): filtri, risultati, salvati. -->
+      <aside id="side" class="side" data-view="filters">
+        <section id="filters-view" class="view">
+          <div class="view-head">
+            <h2>Filtri</h2>
+            <button type="button" id="filters-reset" class="btn-text">AZZERA</button>
+            <button type="button" id="filters-close" class="iconbtn mobile-only" aria-label="Chiudi filtri"><i data-icon="close"></i></button>
+          </div>
+          <div class="view-body">
+            <div id="filters-form"></div>
+            <div id="poi-section"></div>
+            <div class="results-block">
+              <p id="filters-summary" class="section-label"></p>
+              <ul id="filters-results" class="cards"></ul>
+            </div>
+          </div>
+          <div class="view-foot mobile-only">
+            <button type="button" id="show-results" class="btn-primary wide"></button>
+          </div>
+        </section>
 
-    <details id="legend" open>
-      <summary>Legenda</summary>
-      <ul>
-        <li><i class="sw verde"></i>Volo libero (max 120 m)</li>
-        <li><i class="sw giallo"></i>Libero fino alla quota indicata</li>
-        <li><i class="sw rosso"></i>Vietato o con autorizzazione</li>
-      </ul>
-      <p class="legend-title">Punti sulla mappa</p>
-      <div id="poi-toggles" class="poi-toggles"></div>
-      <p id="snapshot" class="snapshot"></p>
-    </details>
+        <section id="results-view" class="view mobile-only" hidden>
+          <div class="view-head">
+            <button type="button" id="results-back" class="iconbtn" aria-label="Torna ai filtri"><i data-icon="back"></i></button>
+            <h2 id="results-title">Risultati</h2>
+            <button type="button" id="results-map" class="btn-text">MAPPA</button>
+          </div>
+          <div class="view-body"><ul id="results-list" class="cards"></ul></div>
+        </section>
 
-    <div id="search" class="search" hidden>
-      <div class="search-box">
-        <input type="search" id="search-input" placeholder="Sentiero, vetta, lago, rifugio, passo, paese…" autocomplete="off" />
-        <button type="button" id="search-close" class="close" aria-label="Chiudi ricerca">×</button>
+        <section id="saved-view" class="view" hidden>
+          <div class="view-head">
+            <h2>Salvati</h2>
+            <button type="button" id="saved-close" class="iconbtn mobile-only" aria-label="Chiudi salvati"><i data-icon="close"></i></button>
+          </div>
+          <div class="view-body" id="saved-body"></div>
+        </section>
+      </aside>
+
+      <div class="mapwrap">
+        <div id="map" aria-label="Mappa dei sentieri"></div>
+
+        <div class="maptools">
+          <button type="button" id="basemap-btn" class="toolbtn" aria-pressed="false" title="Sfondo: pulita / topografica">
+            <i data-icon="layers"></i><span class="tool-k mono" id="basemap-label">PUL</span>
+          </button>
+          <button type="button" id="zones-btn" class="toolbtn" aria-pressed="false" title="Zone D-Flight"><i data-icon="shield"></i></button>
+          <button type="button" id="locate-btn" class="toolbtn" aria-pressed="false" title="La mia posizione"><i data-icon="locate"></i></button>
+          <button type="button" id="zoomin-btn" class="toolbtn desktop-only" title="Avvicina"><i data-icon="plus"></i></button>
+          <button type="button" id="zoomout-btn" class="toolbtn desktop-only" title="Allontana"><i data-icon="minus"></i></button>
+        </div>
+
+        <div id="legend" class="legend">
+          <ul class="legend-lines">
+            <li><i class="ln verde"></i>Libero 120 m</li>
+            <li><i class="ln giallo"></i>Quota limitata</li>
+            <li><i class="ln rosso"></i>No / autorizz.</li>
+          </ul>
+          <p class="legend-meta mono"><span id="trail-count"></span> · <span id="snapshot"></span></p>
+        </div>
+
+        <!-- Scheda: bottom sheet su telefono, pannello sovrapposto su tablet. -->
+        <aside id="sheet" class="sheet" hidden>
+          <div class="sheet-top">
+            <button type="button" id="sheet-handle" class="handle" aria-label="Espandi o riduci la scheda"></button>
+            <button type="button" id="panel-close" class="iconbtn" aria-label="Chiudi"><i data-icon="close"></i></button>
+          </div>
+          <div id="panel-body" class="sheet-body"></div>
+          <div id="panel-foot" class="sheet-foot" hidden></div>
+        </aside>
       </div>
-      <ul id="search-results" class="search-results"></ul>
-    </div>
 
-    <aside id="filters" class="filters" hidden>
-      <div class="filters-head">
-        <h2>Filtri</h2>
-        <button type="button" id="filters-reset" class="link">Azzera</button>
-        <button type="button" id="filters-close" class="close" aria-label="Chiudi filtri">×</button>
-      </div>
-      <div id="filters-form"></div>
-      <p id="filters-summary" class="filters-summary"></p>
-      <ul id="filters-results" class="results"></ul>
-    </aside>
+      <!-- Colonna destra (PC ≥1024): la stessa scheda viene spostata qui da main.ts. -->
+      <aside id="detail" class="detail desktop-wide-only">
+        <div id="detail-empty" class="detail-empty">
+          <i data-icon="map" data-size="28"></i>
+          <p class="section-label">Nessun sentiero selezionato</p>
+          <p class="muted">Tocca un sentiero sulla mappa o scegline uno dalla lista.</p>
+        </div>
+      </aside>
+    </main>
 
-    <aside id="saved" class="filters saved" hidden>
-      <div class="filters-head">
-        <h2>Salvati</h2>
-        <button type="button" id="saved-close" class="close" aria-label="Chiudi salvati">×</button>
-      </div>
-      <div id="saved-body"></div>
-    </aside>
+    <nav class="tabbar mobile-only" aria-label="Sezioni">
+      <button type="button" class="tab" data-tab="map" aria-current="page"><i data-icon="map"></i><span>MAPPA</span></button>
+      <button type="button" class="tab" data-tab="filters"><i data-icon="filter"></i><span>FILTRI</span><span id="tab-count" class="count mono" hidden></span></button>
+      <button type="button" class="tab" data-tab="saved"><i data-icon="bookmark"></i><span>SALVATI</span></button>
+    </nav>
 
-    <aside id="panel" hidden>
-      <button type="button" class="close" id="panel-close" aria-label="Chiudi">×</button>
-      <div id="panel-body"></div>
-    </aside>
-
-    <div id="status" class="status">Caricamento dati…</div>
+    <div id="status" class="toast">Caricamento dati…</div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

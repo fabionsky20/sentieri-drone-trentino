@@ -23,14 +23,14 @@ const zoom = (...stops: number[]) => ['interpolate', ['linear'], ['zoom'], ...st
 // ---------------------------------------------------------------- sfondo pulito
 
 const clean: LayerSpecification[] = [
-  { id: 'bg', type: 'background', paint: { 'background-color': '#f3f1ea' } },
+  { id: 'bg', type: 'background', paint: { 'background-color': '#E3E7DF' } },
   {
     id: 'landcover-wood',
     type: 'fill',
     source: 'ofm',
     'source-layer': 'landcover',
     filter: ['==', ['get', 'class'], 'wood'],
-    paint: { 'fill-color': '#d6e4cb', 'fill-opacity': 0.8 },
+    paint: { 'fill-color': '#D2DCCD', 'fill-opacity': 0.85 },
   },
   {
     id: 'landcover-grass',
@@ -38,7 +38,7 @@ const clean: LayerSpecification[] = [
     source: 'ofm',
     'source-layer': 'landcover',
     filter: ['in', ['get', 'class'], ['literal', ['grass', 'farmland']]],
-    paint: { 'fill-color': '#e9eedd', 'fill-opacity': 0.7 },
+    paint: { 'fill-color': '#DCE3D6', 'fill-opacity': 0.7 },
   },
   {
     id: 'landcover-rock',
@@ -46,7 +46,7 @@ const clean: LayerSpecification[] = [
     source: 'ofm',
     'source-layer': 'landcover',
     filter: ['in', ['get', 'class'], ['literal', ['rock', 'sand']]],
-    paint: { 'fill-color': '#e4e0d8', 'fill-opacity': 0.8 },
+    paint: { 'fill-color': '#E0E2DC', 'fill-opacity': 0.85 },
   },
   {
     id: 'landcover-ice',
@@ -54,7 +54,7 @@ const clean: LayerSpecification[] = [
     source: 'ofm',
     'source-layer': 'landcover',
     filter: ['==', ['get', 'class'], 'ice'],
-    paint: { 'fill-color': '#f5f9fc', 'fill-outline-color': '#c9dcea' },
+    paint: { 'fill-color': '#F4F7F7', 'fill-outline-color': '#C6D8DF' },
   },
   {
     id: 'landuse-urban',
@@ -63,7 +63,7 @@ const clean: LayerSpecification[] = [
     'source-layer': 'landuse',
     minzoom: 9,
     filter: ['in', ['get', 'class'], ['literal', ['residential', 'suburb', 'neighbourhood', 'commercial', 'industrial']]],
-    paint: { 'fill-color': '#e7e1d8', 'fill-opacity': 0.8 },
+    paint: { 'fill-color': '#D9DBD5', 'fill-opacity': 0.85 },
   },
   {
     id: 'hillshade',
@@ -72,9 +72,9 @@ const clean: LayerSpecification[] = [
     paint: {
       // Più leggero da vicino, dove le pareti ripide diventerebbero macchie scure.
       'hillshade-exaggeration': zoom(6, 0.3, 10, 0.42, 14, 0.3),
-      'hillshade-shadow-color': '#62665b',
+      'hillshade-shadow-color': '#56605A',
       'hillshade-highlight-color': '#ffffff',
-      'hillshade-accent-color': '#6f7366',
+      'hillshade-accent-color': '#69736D',
     },
   },
   {
@@ -82,7 +82,7 @@ const clean: LayerSpecification[] = [
     type: 'fill',
     source: 'ofm',
     'source-layer': 'water',
-    paint: { 'fill-color': '#b7d3e6' },
+    paint: { 'fill-color': '#BBD5E0' },
   },
   {
     id: 'waterway-river',
@@ -91,7 +91,7 @@ const clean: LayerSpecification[] = [
     'source-layer': 'waterway',
     minzoom: 8,
     filter: ['==', ['get', 'class'], 'river'],
-    paint: { 'line-color': '#9cc0db', 'line-width': zoom(8, 0.6, 12, 1.4, 16, 2.5) },
+    paint: { 'line-color': '#93BED1', 'line-width': zoom(8, 0.6, 12, 1.4, 16, 2.5) },
   },
   {
     id: 'waterway-stream',
@@ -100,7 +100,7 @@ const clean: LayerSpecification[] = [
     'source-layer': 'waterway',
     minzoom: 13,
     filter: ['!=', ['get', 'class'], 'river'],
-    paint: { 'line-color': '#a9c9e0', 'line-width': zoom(13, 0.6, 16, 1.4) },
+    paint: { 'line-color': '#A6C9D8', 'line-width': zoom(13, 0.6, 16, 1.4) },
   },
   {
     id: 'boundary-region',
@@ -127,7 +127,7 @@ const clean: LayerSpecification[] = [
     'source-layer': 'transportation',
     minzoom: 10,
     filter: ['==', ['get', 'class'], 'rail'],
-    paint: { 'line-color': '#b3aca2', 'line-width': 1, 'line-dasharray': [4, 2] },
+    paint: { 'line-color': '#A9AFA9', 'line-width': 1, 'line-dasharray': [4, 2] },
   },
   // Strade: solo la rete carrabile, mai path/track/footway. Le minori compaiono da vicino.
   {
@@ -138,7 +138,7 @@ const clean: LayerSpecification[] = [
     minzoom: 12,
     filter: ['all', ['in', ['get', 'class'], ['literal', ['tertiary', 'minor']]], ['!=', ['get', 'brunnel'], 'tunnel']],
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#ffffff', 'line-width': zoom(12, 0.8, 16, 4), 'line-opacity': 0.9 },
+    paint: { 'line-color': '#F7F8F5', 'line-width': zoom(12, 0.8, 16, 4), 'line-opacity': 0.95 },
   },
   {
     id: 'road-main',
@@ -148,7 +148,7 @@ const clean: LayerSpecification[] = [
     minzoom: 7,
     filter: ['all', ['in', ['get', 'class'], ['literal', ['primary', 'secondary']]], ['!=', ['get', 'brunnel'], 'tunnel']],
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#fbf3e2', 'line-width': zoom(7, 0.6, 12, 2.2, 16, 6) },
+    paint: { 'line-color': '#F6F3EA', 'line-width': zoom(7, 0.6, 12, 2.2, 16, 6) },
   },
   {
     id: 'road-major',
@@ -157,7 +157,7 @@ const clean: LayerSpecification[] = [
     'source-layer': 'transportation',
     filter: ['all', ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]], ['!=', ['get', 'brunnel'], 'tunnel']],
     layout: { 'line-cap': 'round', 'line-join': 'round' },
-    paint: { 'line-color': '#f0c98f', 'line-width': zoom(6, 0.8, 12, 2.6, 16, 7) },
+    paint: { 'line-color': '#E3CFA4', 'line-width': zoom(6, 0.8, 12, 2.6, 16, 7) },
   },
   {
     id: 'building',
@@ -165,7 +165,7 @@ const clean: LayerSpecification[] = [
     source: 'ofm',
     'source-layer': 'building',
     minzoom: 14,
-    paint: { 'fill-color': '#dcd4c8', 'fill-opacity': 0.8 },
+    paint: { 'fill-color': '#CDD0C9', 'fill-opacity': 0.9 },
   },
 
   // ---- etichette (le linee dei sentieri vengono inserite subito sotto questa prima) ----
@@ -183,7 +183,7 @@ const clean: LayerSpecification[] = [
       'text-size': 11,
       'symbol-spacing': 400,
     },
-    paint: { 'text-color': '#4a7ca3', ...HALO },
+    paint: { 'text-color': '#2F6F8A', ...HALO },
   },
   {
     id: 'lbl-lake',
@@ -193,7 +193,7 @@ const clean: LayerSpecification[] = [
     minzoom: 9,
     filter: ['in', ['get', 'class'], ['literal', ['lake', 'reservoir', 'water']]],
     layout: { 'text-field': NAME, 'text-font': FONT.italic, 'text-size': zoom(9, 11, 14, 13), 'text-max-width': 8 },
-    paint: { 'text-color': '#3f74a0', ...HALO },
+    paint: { 'text-color': '#2F6F8A', ...HALO },
   },
   // Vette: da zoom 11 solo le più importanti del riquadro (rank basso), da 13 tutte, con quota.
   peakLayer('lbl-peak-major', 11, 13, 2, false),
@@ -237,10 +237,10 @@ const clean: LayerSpecification[] = [
     },
     paint: { 'text-color': '#8a2f16', ...HALO },
   },
-  placeLayer('lbl-hamlet', ['hamlet', 'isolated_dwelling', 'locality'], 13, zoom(13, 10.5, 16, 12), FONT.regular, '#5f5a52'),
-  placeLayer('lbl-village', ['village', 'suburb'], 11, zoom(11, 11, 15, 13), FONT.regular, '#3d3a34'),
-  placeLayer('lbl-town', ['town'], 9, zoom(9, 12, 14, 15), FONT.bold, '#2f2c27'),
-  placeLayer('lbl-city', ['city'], 5, zoom(6, 13, 12, 18), FONT.bold, '#1f1d1a'),
+  placeLayer('lbl-hamlet', ['hamlet', 'isolated_dwelling', 'locality'], 13, zoom(13, 10.5, 16, 12), FONT.regular, '#4F5C59'),
+  placeLayer('lbl-village', ['village', 'suburb'], 11, zoom(11, 11, 15, 13), FONT.regular, '#2C3A3A'),
+  placeLayer('lbl-town', ['town'], 9, zoom(9, 12, 14, 15), FONT.bold, '#1D2B2E'),
+  placeLayer('lbl-city', ['city'], 5, zoom(6, 13, 12, 18), FONT.bold, '#142024'),
 ]
 
 function peakLayer(id: string, minzoom: number, maxzoom: number, maxRank: number, withEle: boolean): LayerSpecification {

@@ -15,7 +15,7 @@ export interface CategoryInfo {
 
 /** Categorie dei POI: nome, colore, visibilità iniziale. */
 export const CATEGORIES: Record<PoiCategory, CategoryInfo> = {
-  lago: { label: 'Lago', plural: 'Laghi', color: '#2b7bb9', visible: true },
+  lago: { label: 'Lago', plural: 'Laghi', color: '#5FA8C9', visible: true },
   cascata: { label: 'Cascata', plural: 'Cascate', color: '#1aa3b8', visible: true },
   malga: { label: 'Malga', plural: 'Malghe', color: '#4d8b31', visible: true },
   rifugio: { label: 'Rifugio', plural: 'Rifugi', color: '#b5401c', visible: true },
