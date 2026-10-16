@@ -1,10 +1,20 @@
-# Sentieri & Drone — Trentino
+# Quota 120 — Trentino
 
-Web app personale (uso interno, 2 utenti, non pubblica) per scegliere sentieri SAT in
-Trentino dove volare con un drone DJI Mini (categoria Open, <250 g) e fare foto/video.
+**Quota 120** (repo `sentieri-drone-trentino`): app per chi fa foto/video col drone in montagna.
+Sceglie dove andare (sentieri SAT), sa se e quanto può volare quel giorno (zone D-Flight, NOTAM,
+meteo), si organizza con gli amici, tiene traccia di dove è stato.
 
 L'utente non scrive codice: Claude implementa tutto e spiega le scelte in breve, in italiano.
 Questo file è il riferimento per tutte le fasi. Dettagli sui dati reali: [docs/DATA.md](docs/DATA.md).
+
+## Roadmap (sintesi) — dettagli in [docs/ROADMAP.md](docs/ROADMAP.md)
+
+- **Uso attuale privato** (gruppo di ~10 amici), **costo zero**: GitHub Pages + Firebase Spark. Niente di commerciale (no ads, no pagamenti) finché non ci saranno permessi da D-Flight.
+- **Fase 1 Fondamenta:** A login aperto + profilo + hangar ✅ → B bacheche condivise con inviti → C note sui sentieri, "segna come fatto", statistiche → D meteo e indice di volabilità.
+- **Fase 2 Beta:** PWA offline, notifiche push, anteprima di volo 3D (camera a 120 m che ruota a 360°), ostacoli da OSM (cavi, linee elettriche, elisuperfici), segnalazioni con scadenza, Android in test chiuso.
+- **Dopo:** luce/ora d'oro, mare di nubi, "cosa vedo da qui", punti di decollo, badge, card Instagram, lista inquadrature.
+- **REGOLA FISSA: l'app non registra, chiede o mostra MAI la quota a cui l'utente ha volato, né importa log di volo. Nessuna statistica di quota volata.** Si mostrano solo i limiti dello spazio aereo.
+- **Privacy:** storico e statistiche privati di default; ogni utente legge solo i propri dati.
 
 ## Fonti dati
 
@@ -62,7 +72,7 @@ data/raw/        input scaricati a mano (non versionato)
 data/processed/  output statici: GeoJSON (o PMTiles se troppo grandi) + indice di ricerca JSON
 data/closures.yaml  chiusure gestite a mano
 web/             app statica Vite + TypeScript + MapLibre GL, nessun backend
-docs/            documentazione (DATA.md, ...)
+docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
 ```
 
 - Calcoli geometrici in un CRS metrico (EPSG:32632 / ETRS89-UTM32N), output in WGS84 (EPSG:4326) per il web.
@@ -114,17 +124,24 @@ docs/            documentazione (DATA.md, ...)
 - **Fase 3** ✅ mappa pulita: sfondo vettoriale + rilievo, selettore sfondo, tratti con ombra e bordo chiaro.
 - **Fase 4** ✅ POI OSM + valli, badge di prossimità, dislivello e profilo dal DEM, filtri, ricerca, foto Wikimedia, icone POI. Dettagli dati in `docs/DATA.md` §5. Il design dell'app si rifà alla fine: per ora lo stile è funzionale.
 - **Fase 5** ✅ chiusure (`data/closures.yaml` → `pipeline/closures.py` → `closures.json`; `web/src/closures.ts`, filtro "Solo sentieri aperti") e sentieri salvati con Firebase (Auth Google + Firestore, progetto `sentieri-e-drone`, piano Spark).
-  - `web/src/saved.ts` caricato solo quando serve (import dinamico; subito all'avvio se il dispositivo aveva già fatto login, flag `salvati-attivo`). Login con popup (non redirect: il sito non è ospitato su Firebase).
-  - Membri in `membri/{uid}`, aggiunti a mano dalla console: guida in `docs/SALVATI.md`. Regole in `firestore.rules` (copia di riferimento: vanno pubblicate dalla console). Mai email o dati personali nel repo.
   - Gli avvisi "Cross-Origin-Opener-Policy … window.closed" in console durante il login con popup sono noti e innocui.
 - **Fase 6** ✅ redesign grafico (solo estetica e layout). Regole in "Design" qui sotto.
-- Fasi successive da pianificare (PWA offline, meteo).
+- **Roadmap Fase 1 · passo A** ✅ nome "Quota 120", manifest PWA (`web/public/`), login aperto, profilo, onboarding, hangar, scadenze. Vedi "Account" qui sotto.
+
+## Account (Roadmap Fase 1 · A)
+
+- `web/src/account.ts`: Firebase Auth (Google, popup) + Firestore. Caricato solo quando serve (import dinamico; subito all'avvio se il dispositivo aveva già fatto login, flag `salvati-attivo`). Profilo creato in automatico al primo login; migrazione automatica `utenti/{uid}/salvati` → `users/{uid}/saved` (vecchi documenti lasciati).
+- Dati per utente: `users/{uid}` (profilo + scadenze documenti), `users/{uid}/saved`, `users/{uid}/droni`. La lista `condivisi` resta riservata ai membri storici (`membri/{uid}`) fino alle bacheche del passo B.
+- `web/src/profilepage.ts`: pagina profilo, hangar (preset modelli DJI → classe e peso), documenti pilota, avvisi a 30 giorni (`WARN_DAYS`), onboarding 3 passi, elimina account.
+- Mentre un modulo del profilo è aperto, gli aggiornamenti da Firestore non ridisegnano la pagina (`renderProfileView(force)`).
+- `firestore.rules`: ogni utente legge/scrive solo i propri dati, campi in whitelist (`hasOnly`), lunghezze, date AAAA-MM-GG, classe/peso validati, timestamp del server. **Vanno pubblicate a mano dalla console** dopo ogni modifica. Guida e modello dati: [docs/ACCOUNT.md](docs/ACCOUNT.md).
+- Prove: emulatori Firebase (Java 21 + `firebase-tools`), `?emulatori` su localhost collega l'app agli emulatori (progetto `demo-quota120`). Mai email o dati personali nel repo.
 
 ## Design (fase 6)
 
 - Stile "strumento di volo outdoor", tema unico chiaro. Variabili CSS su `:root` in `web/src/style.css`: `--bg #EEF0EC`, `--panel #FFF`, `--panel2 #F2F4F1`, `--line #D3D9D3`, `--ink #142024`, `--muted #4F5C59`, `--accent #0B6E84` (unico colore per elementi interattivi/attivi), `--glass`. Stati di volo SOLO per il volo: verde `#2FBF71`, giallo `#E9AE0B` (testo `#1A1400`), rosso `#E5484D`; lago `#5FA8C9`.
 - **Contrasto:** testo bianco o scuro su verde/rosso non arriva a 4,5:1 → verde e rosso solo come pallini, barre e bordi, testo sempre scuro su fondo chiaro. Il giallo può essere pieno.
 - Font Google: IBM Plex Sans (testo), Plex Sans Condensed 600/700 (titoli, pulsanti in maiuscolo con spaziatura .06em), Plex Mono 500/600 (tutti i dati e le etichette di sezione, classe `.mono` / `.section-label`). Le etichette sulla mappa restano Noto Sans (font di OpenFreeMap).
-- Layout: telefono < 768 (barra in alto galleggiante, colonna strumenti, legenda a striscia, tabbar MAPPA/FILTRI/SALVATI, scheda bottom sheet spostata in `body`); tablet 768–1023 (header + colonna sinistra, scheda sovrapposta alla mappa); PC ≥ 1024 (tre colonne: filtri+risultati | mappa | scheda in `#detail`). `placeSheet()` in `main.ts` sposta la scheda.
+- Layout: telefono < 768 (barra in alto galleggiante, colonna strumenti, legenda a striscia, tabbar MAPPA/FILTRI/SALVATI/PROFILO con avatar, scheda bottom sheet spostata in `body`); tablet 768–1023 (header + colonna sinistra, scheda sovrapposta alla mappa); PC ≥ 1024 (tre colonne: filtri+risultati | mappa | scheda in `#detail`). `placeSheet()` in `main.ts` sposta la scheda.
 - Su telefono `.layout` non deve creare un contesto di sovrapposizione (niente `position: fixed` su di esso), altrimenti scheda e schermate finiscono sotto barra in alto e tabbar. Su ≥ 768 `.side` torna a `z-index: auto`.
 - Icone SVG a tratto in `web/src/ui.ts` (niente emoji). Target touch ≥ 44 px.

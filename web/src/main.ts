@@ -13,7 +13,8 @@ import { CATEGORIES, CATEGORY_ORDER, registerIcons } from './icons'
 import { catIcon, dotDate, formatDate, h, renderPoi, renderTrail, renderZones, trailCard } from './panel'
 import { photosSection } from './photos'
 import { renderProfile } from './profile'
-import type { ListName, SavedState } from './saved'
+import type { AccountState, ListName } from './account'
+import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt } from './trailgeom'
 import type {
@@ -470,22 +471,25 @@ if (meta.snapshot) {
 // ---------------------------------------------------------------- navigazione (telefono) e colonne (PC)
 
 const side = $('side')
-type View = 'filters' | 'results' | 'saved'
-type Tab = 'map' | 'filters' | 'saved'
+type View = 'filters' | 'results' | 'saved' | 'profile'
+type Tab = 'map' | 'filters' | 'saved' | 'profile'
 
 function showView(view: View): void {
   $('filters-view').hidden = view !== 'filters'
   $('results-view').hidden = view !== 'results'
   $('saved-view').hidden = view !== 'saved'
+  $('profile-view').hidden = view !== 'profile'
   side.dataset.view = view
   $('open-saved').setAttribute('aria-pressed', String(view === 'saved'))
-  if (view === 'saved') {
-    loadSaved()
+  $('open-profile').setAttribute('aria-pressed', String(view === 'profile'))
+  if (view === 'saved' || view === 'profile') {
+    loadAccount()
     renderSavedSheet()
+    renderProfileView()
   }
 }
 
-/** Telefono: MAPPA chiude le schermate, FILTRI/SALVATI le aprono a tutto schermo. */
+/** Telefono: MAPPA chiude le schermate, FILTRI/SALVATI/PROFILO le aprono a tutto schermo. */
 function setTab(tab: Tab): void {
   side.dataset.open = String(tab !== 'map')
   if (tab !== 'map') {
@@ -501,11 +505,13 @@ for (const b of document.querySelectorAll<HTMLElement>('.tab')) b.addEventListen
 $('open-filters').addEventListener('click', () => setTab('filters'))
 $('filters-close').addEventListener('click', () => setTab('map'))
 $('saved-close').addEventListener('click', () => setTab('map'))
+$('profile-close').addEventListener('click', () => setTab('map'))
 $('show-results').addEventListener('click', () => showView('results'))
 $('results-back').addEventListener('click', () => showView('filters'))
 $('results-map').addEventListener('click', () => setTab('map'))
 // PC: il pulsante SALVATI alterna Filtri e Salvati nella colonna sinistra.
 $('open-saved').addEventListener('click', () => showView(side.dataset.view === 'saved' ? 'filters' : 'saved'))
+$('open-profile').addEventListener('click', () => showView(side.dataset.view === 'profile' ? 'filters' : 'profile'))
 showView('filters')
 
 // ---------------------------------------------------------------- scheda
@@ -688,7 +694,7 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
   return trailCard(t, {
     km: kmOf(t.id),
     closed: closedIds.has(t.id),
-    saved: !!(saved?.miei.has(t.id) || saved?.condivisi.has(t.id)),
+    saved: !!(acct?.miei.has(t.id) || acct?.condivisi.has(t.id)),
     ...extra,
     onOpen: () => {
       select({ kind: 'trail', id: t.id })
@@ -705,8 +711,8 @@ function applyFilters(): void {
     const ctx = {
       km: kmOf(t.id),
       closed: closedIds.has(t.id),
-      mine: saved?.miei.has(t.id) ?? false,
-      shared: saved?.condivisi.has(t.id) ?? false,
+      mine: acct?.miei.has(t.id) ?? false,
+      shared: acct?.condivisi.has(t.id) ?? false,
     }
     if (matches(t, ctx, filters)) {
       ok.add(t.id)
@@ -870,34 +876,39 @@ for (const layer of ['seg-hit', 'zone-fill', 'poi-icons']) {
   map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''))
 }
 
-// ---------------------------------------------------------------- sentieri salvati (Firebase)
+// ---------------------------------------------------------------- account: login, profilo, salvati (Firebase)
 
-// Il modulo Firebase si scarica solo quando serve: al primo uso di "Salva"/"Salvati", oppure
+// Il modulo Firebase si scarica solo quando serve: al primo uso di Salva/Salvati/Profilo, oppure
 // subito all'avvio se su questo dispositivo era già stato fatto il login.
-let saved: SavedState | null = null
-let savedModule: Promise<typeof import('./saved')> | null = null
+let acct: AccountState | null = null
+let accountModule: Promise<typeof import('./account')> | null = null
 let currentSave: { trailId: string; box: HTMLElement } | null = null
 let savedTab: ListName = 'miei'
+let onboardingStep = 0
+let onboardingClosed = false // saltato in questa visita, in attesa che arrivi il salvataggio
 
-function loadSaved(): Promise<typeof import('./saved')> {
-  if (!savedModule) {
-    savedModule = import('./saved')
-    savedModule
+function loadAccount(): Promise<typeof import('./account')> {
+  if (!accountModule) {
+    accountModule = import('./account')
+    accountModule
       .then((m) =>
         m.subscribe((st) => {
-          saved = st
+          acct = st
           store('salvati-attivo', st.status !== 'anonimo')
           renderSaveBox()
           renderSavedSheet()
+          renderProfileView()
+          renderAvatars()
+          renderOnboarding()
           applyFilters()
         }),
       )
       .catch((e) => {
-        savedModule = null
-        showToast(`Impossibile caricare il servizio dei salvati: ${e.message}`)
+        accountModule = null
+        showToast(`Impossibile caricare il servizio account: ${e.message}`)
       })
   }
-  return savedModule
+  return accountModule
 }
 
 function openSaved(): void {
@@ -907,7 +918,7 @@ function openSaved(): void {
 
 async function doLogin(): Promise<void> {
   try {
-    const m = await loadSaved()
+    const m = await loadAccount()
     await m.login()
   } catch (e) {
     const code = (e as { code?: string }).code ?? ''
@@ -920,13 +931,33 @@ async function doLogin(): Promise<void> {
   }
 }
 
+const accountActions = (): ProfileActions => ({
+  login: doLogin,
+  logout: () => void loadAccount().then((m) => m.logout()),
+  retry: () => void loadAccount().then((m) => m.retry()),
+  updateProfile: async (p) => (await loadAccount()).updateProfile(p),
+  saveDrone: async (d, id) => (await loadAccount()).saveDrone(d, id),
+  removeDrone: async (id) => (await loadAccount()).removeDrone(id),
+  deleteAccount: async () => {
+    await (await loadAccount()).deleteAccount()
+    showToast('Account eliminato. Tutti i tuoi dati sono stati cancellati.')
+  },
+  zoneSuggestions: [...gruppi, ...valleysFC.features.filter((f) => f.properties.principale).map((f) => f.properties.nome)].sort((a, b) =>
+    a.localeCompare(b, 'it'),
+  ),
+})
+
 async function toggleSaved(list: ListName, trailId: string): Promise<void> {
-  const m = await loadSaved()
-  if (saved?.status !== 'membro') {
+  const m = await loadAccount()
+  if (acct?.status !== 'pronto') {
     openSaved()
     return
   }
-  const has = list === 'miei' ? saved.miei.has(trailId) : saved.condivisi.has(trailId)
+  if (list === 'condivisi' && !acct.legacyMember) {
+    showToast('La lista condivisa diventerà una bacheca con inviti nel prossimo aggiornamento.')
+    return
+  }
+  const has = list === 'miei' ? acct.miei.has(trailId) : acct.condivisi.has(trailId)
   try {
     await (has ? m.remove(list, trailId) : m.save(list, trailId))
   } catch (e) {
@@ -934,7 +965,7 @@ async function toggleSaved(list: ListName, trailId: string): Promise<void> {
   }
 }
 
-/** Pulsanti fissi in fondo alla scheda: SALVA NEI MIEI (pieno) e CONDIVISI (bordo). */
+/** Pulsanti fissi in fondo alla scheda: SALVA NEI MIEI (pieno) e CONDIVISI (bordo, solo membri storici). */
 function renderSaveBox(): void {
   if (!currentSave) {
     foot.hidden = true
@@ -942,73 +973,65 @@ function renderSaveBox(): void {
     return
   }
   const { trailId } = currentSave
-  const mine = !!saved?.miei.has(trailId)
-  const shared = !!saved?.condivisi.has(trailId)
+  const mine = !!acct?.miei.has(trailId)
+  const shared = !!acct?.condivisi.has(trailId)
   const b1 = h('button', { type: 'button', class: 'btn-primary', 'aria-pressed': String(mine) }, icon(mine ? 'bookmarkFilled' : 'bookmark', 18), mine ? 'NEI MIEI' : 'SALVA NEI MIEI')
-  const b2 = h('button', { type: 'button', class: 'btn-outline', 'aria-pressed': String(shared) }, icon(shared ? 'bookmarkFilled' : 'bookmark', 18), shared ? 'IN CONDIVISI' : 'CONDIVISI')
   b1.addEventListener('click', () => toggleSaved('miei', trailId))
-  b2.addEventListener('click', () => toggleSaved('condivisi', trailId))
-  foot.replaceChildren(b1, b2)
+  const buttons = [b1]
+  if (acct?.legacyMember) {
+    const b2 = h('button', { type: 'button', class: 'btn-outline', 'aria-pressed': String(shared) }, icon(shared ? 'bookmarkFilled' : 'bookmark', 18), shared ? 'IN CONDIVISI' : 'CONDIVISI')
+    b2.addEventListener('click', () => toggleSaved('condivisi', trailId))
+    buttons.push(b2)
+  }
+  foot.classList.toggle('single', buttons.length === 1)
+  foot.replaceChildren(...buttons)
   foot.hidden = false
+}
+
+function loginPrompt(text: string): HTMLElement[] {
+  const b = h('button', { type: 'button', class: 'btn-primary wide' }, 'ACCEDI CON GOOGLE')
+  b.addEventListener('click', doLogin)
+  return [h('div', { class: 'empty-state' }, icon('bookmark', 28), h('p', {}, text)), b]
 }
 
 /** Contenuto della sezione "Salvati" secondo lo stato del login. */
 function renderSavedSheet(): void {
   if ($('saved-view').hidden) return
-  const st = saved
+  const st = acct
   const parts: HTMLElement[] = []
-  const retry = () => {
-    const b = h('button', { type: 'button', class: 'btn-primary' }, 'RIPROVA')
-    b.addEventListener('click', () => loadSaved().then((m) => m.retry()))
-    return b
-  }
   if (!st || st.status === 'caricamento') {
     parts.push(h('p', { class: 'muted' }, 'Caricamento…'))
   } else if (st.status === 'anonimo') {
-    const b = h('button', { type: 'button', class: 'btn-primary wide' }, 'ACCEDI CON GOOGLE')
-    b.addEventListener('click', doLogin)
-    parts.push(
-      h('div', { class: 'empty-state' }, icon('bookmark', 28), h('p', {}, "Accedi per salvare i sentieri e ritrovarli sincronizzati su telefono e PC. L'accesso resta attivo: non serve rifarlo ogni volta.")),
-      b,
-    )
-  } else if (st.status === 'non-membro') {
-    const uid = st.user?.uid ?? ''
-    const copy = h('button', { type: 'button', class: 'btn-text' }, 'COPIA')
-    copy.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(uid)
-        copy.textContent = 'COPIATO'
-      } catch {
-        copy.textContent = 'COPIA A MANO'
-      }
-    })
-    parts.push(
-      h('p', {}, `Accesso fatto come ${st.user?.nome ?? st.user?.email ?? 'utente Google'}, ma questo account non è ancora tra i membri dell'app.`),
-      h('p', { class: 'section-label' }, 'Il tuo ID utente, da aggiungere ai membri'),
-      h('div', { class: 'uid' }, h('code', { class: 'mono' }, uid), copy),
-      retry(),
-    )
+    parts.push(...loginPrompt("Accedi per salvare i sentieri e ritrovarli sincronizzati su telefono e PC. L'accesso resta attivo: non serve rifarlo ogni volta."))
   } else if (st.status === 'errore') {
-    parts.push(h('p', { class: 'warn' }, `Errore: ${st.errore}`), retry())
+    const b = h('button', { type: 'button', class: 'btn-primary' }, 'RIPROVA')
+    b.addEventListener('click', () => loadAccount().then((m) => m.retry()))
+    parts.push(h('p', { class: 'warn' }, `Errore: ${st.errore}`), b)
   } else {
-    const seg = segmented<ListName>(
-      [
-        ['miei', `I miei · ${st.miei.size}`],
-        ['condivisi', `Condivisi · ${st.condivisi.size}`],
-      ],
-      savedTab,
-      (v) => {
-        savedTab = v
-        renderSavedSheet()
-      },
-    )
+    if (!st.legacyMember) savedTab = 'miei'
+    if (st.legacyMember) {
+      parts.push(
+        segmented<ListName>(
+          [
+            ['miei', `I miei · ${st.miei.size}`],
+            ['condivisi', `Condivisi · ${st.condivisi.size}`],
+          ],
+          savedTab,
+          (v) => {
+            savedTab = v
+            renderSavedSheet()
+          },
+        ),
+      )
+    } else {
+      parts.push(h('p', { class: 'section-label' }, `I miei · ${st.miei.size}`))
+    }
+    if (savedTab === 'condivisi') {
+      parts.push(h('p', { class: 'hint' }, `Lista comune dei membri storici: ${[...st.membri.values()].join(', ')}. Diventerà una bacheca con inviti.`))
+    }
     const entries = savedTab === 'miei' ? [...st.miei] : [...st.condivisi]
     const known = entries.filter(([id]) => trails.has(id))
     known.sort((a, b) => (b[1].aggiunto?.getTime() ?? 0) - (a[1].aggiunto?.getTime() ?? 0))
-    parts.push(seg)
-    if (savedTab === 'condivisi') {
-      parts.push(h('p', { class: 'hint' }, `Lista comune a tutti i membri: ${[...st.membri.values()].join(', ')}.`))
-    }
     if (!known.length) {
       parts.push(
         h('p', { class: 'muted empty-list' }, savedTab === 'miei' ? 'Nessun sentiero salvato: usa "Salva nei miei" nella scheda di un sentiero.' : 'La lista condivisa è vuota.'),
@@ -1026,15 +1049,59 @@ function renderSavedSheet(): void {
       }
       parts.push(list)
     }
-  }
-  if (st?.user) {
-    const out = h('button', { type: 'button', class: 'btn-text' }, 'ESCI')
-    out.addEventListener('click', () => loadSaved().then((m) => m.logout()))
-    parts.push(h('div', { class: 'account' }, h('span', { class: 'muted small' }, `${st.user.nome ?? ''}${st.user.email ? ` · ${st.user.email}` : ''}`), out))
+    if (!st.legacyMember) parts.push(h('p', { class: 'hint' }, 'Le bacheche condivise con gli amici arrivano nel prossimo passo.'))
   }
   $('saved-body').replaceChildren(...parts)
 }
 
-if (stored('salvati-attivo', false)) loadSaved()
+/** Pagina profilo (schermata su telefono, colonna sinistra su PC). Mentre un modulo è aperto
+ *  (drone o nome in modifica) gli aggiornamenti in arrivo non ridisegnano la pagina, per non
+ *  cancellare quello che si sta scrivendo: si ridisegna dopo Salva/Annulla (force). */
+function renderProfileView(force = false): void {
+  if ($('profile-view').hidden) return
+  const body = $('profile-body')
+  if (!force && body.querySelector('.card.editing, .identity-form')) return
+  body.replaceChildren(...renderProfilePage(acct, accountActions(), () => renderProfileView(true)))
+}
+
+/** Avatar nella barra in basso (telefono) e in alto a destra (PC), con pallino se ci sono scadenze. */
+function renderAvatars(): void {
+  const logged = acct?.status === 'pronto' && acct.profile
+  const alerts = logged ? expiries(acct!.profile, acct!.droni).length > 0 : false
+  for (const [slot, size] of [
+    ['tab-avatar', 26],
+    ['header-avatar', 40],
+  ] as const) {
+    $(slot).replaceChildren(logged ? avatarEl(acct!.profile!.avatar, acct!.profile!.nome, size) : icon('user', size === 40 ? 22 : 22))
+  }
+  $('tab-alert').hidden = !alerts
+  $('header-alert').hidden = !alerts
+  const label = logged ? `Profilo di ${acct!.profile!.nome}${alerts ? ' (scadenze in arrivo)' : ''}` : 'Profilo'
+  $('open-profile').setAttribute('aria-label', label)
+  $('open-profile').title = label
+}
+
+/** Primo accesso: onboarding finché il profilo non risulta completato o saltato. */
+function renderOnboarding(): void {
+  const el = $('onboarding')
+  const need = acct?.status === 'pronto' && acct.profile && !acct.profile.onboarding && !onboardingClosed
+  el.hidden = !need
+  if (!need) return
+  const a = accountActions()
+  el.replaceChildren(
+    renderOnboarding_(acct!, a, onboardingStep, (step) => {
+      if (step === 'fine') {
+        onboardingClosed = true
+        el.hidden = true
+        void a.updateProfile({ onboarding: true }).catch(() => {})
+        return
+      }
+      onboardingStep = step
+      renderOnboarding()
+    }),
+  )
+}
+
+if (stored('salvati-attivo', false)) loadAccount()
 
 applyDay()

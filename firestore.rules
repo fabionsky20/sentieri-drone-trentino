@@ -1,22 +1,34 @@
-// Regole di sicurezza di Firestore per "Sentieri & Drone".
+// Regole di sicurezza di Firestore per "Quota 120".
 // Vanno copiate nella console Firebase: Firestore Database → Regole → Pubblica.
-// Questo file nel repo è solo la copia di riferimento (nessun dato personale).
+// Questo file nel repo è la copia di riferimento (nessun dato personale).
 //
-// Chi può fare cosa:
-// - "membri/{uid}": l'elenco degli utenti ammessi. Si modifica SOLO dalla console Firebase
-//   (un documento per persona, con ID = UID dell'utente, campo "nome").
-// - "utenti/{uid}/salvati/{sentiero}": i preferiti di ciascuno, visibili solo al proprietario.
-// - "condivisi/{sentiero}": la lista comune, letta e modificata da tutti i membri.
-// Chi non è membro (anche se ha fatto login con Google) non legge e non scrive nulla.
+// Struttura (Fase 1 · passo A):
+// - users/{uid}                 profilo: nome, zona, avatar, scadenze documenti pilota
+// - users/{uid}/saved/{trail}   sentieri salvati ("I miei")
+// - users/{uid}/droni/{id}      hangar: droni con classe, peso, assicurazione
+//   → ogni utente legge e scrive SOLO i propri dati. Nessun dato è pubblico.
+// - condivisi/{trail}           lista condivisa storica: resta riservata ai membri storici
+//                               (raccolta "membri") finché al passo B non diventa una bacheca
+// - utenti/{uid}/salvati/...    vecchia posizione dei salvati: solo lettura/cancellazione
+//                               del proprietario, per la migrazione automatica
+//
+// REGOLA FISSA DEL PROGETTO: nessun campo per la quota di volo dell'utente, né log di volo.
 
 rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isMember() {
-      return request.auth != null
-        && exists(/databases/$(database)/documents/membri/$(request.auth.uid));
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isLegacyMember() {
+      return signedIn() && exists(/databases/$(database)/documents/membri/$(request.auth.uid));
     }
 
     // Id dei sentieri SAT: E310, O207, E102A, E396-b …
@@ -24,22 +36,88 @@ service cloud.firestore {
       return id.matches('^[EO][0-9]{3}[A-Z]?(-[a-z])?$');
     }
 
-    match /membri/{uid} {
-      allow read: if isMember();
-      allow write: if false;
+    function str(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
     }
 
+    function optStr(v, max) {
+      return v == null || str(v, 0, max);
+    }
+
+    // Data AAAA-MM-GG oppure null
+    function optDate(v) {
+      return v == null || (v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'));
+    }
+
+    // ---------------------------------------------------------------- profilo
+
+    function validProfile(d) {
+      return d.keys().hasAll(['nome', 'onboarding', 'migrato', 'creato', 'aggiornato'])
+        && d.keys().hasOnly(['nome', 'zona', 'avatar', 'onboarding', 'migrato',
+                             'attestato_scadenza', 'dflight_scadenza', 'creato', 'aggiornato'])
+        && str(d.nome, 1, 60)
+        && optStr(d.get('zona', null), 80)
+        && optStr(d.get('avatar', null), 600)
+        && d.onboarding is bool
+        && d.migrato is bool
+        && optDate(d.get('attestato_scadenza', null))
+        && optDate(d.get('dflight_scadenza', null))
+        && d.aggiornato == request.time;
+    }
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && validProfile(request.resource.data)
+        && request.resource.data.creato == request.time;
+      allow update: if isOwner(uid)
+        && validProfile(request.resource.data)
+        && request.resource.data.creato == resource.data.creato;
+
+      match /saved/{trail} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && validTrail(trail)
+          && request.resource.data.keys().hasOnly(['aggiunto'])
+          && request.resource.data.aggiunto == request.time;
+      }
+
+      match /droni/{drone} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && drone.size() <= 40
+          && request.resource.data.keys().hasAll(['modello', 'classe', 'peso_g', 'aggiornato'])
+          && request.resource.data.keys().hasOnly(['modello', 'classe', 'peso_g',
+                                                   'assicurazione_scadenza', 'aggiornato'])
+          && str(request.resource.data.modello, 1, 60)
+          && request.resource.data.classe in ['C0', 'C1', 'C2', 'legacy']
+          && request.resource.data.peso_g is int
+          && request.resource.data.peso_g >= 1
+          && request.resource.data.peso_g <= 25000
+          && optDate(request.resource.data.get('assicurazione_scadenza', null))
+          && request.resource.data.aggiornato == request.time;
+      }
+    }
+
+    // ---------------------------------------------------------------- dati storici
+
+    // Vecchi salvati: il proprietario li legge (migrazione) e li può cancellare.
     match /utenti/{uid}/salvati/{trail} {
-      allow read, delete: if isMember() && request.auth.uid == uid;
-      allow create, update: if isMember() && request.auth.uid == uid
-        && validTrail(trail)
-        && request.resource.data.keys().hasOnly(['aggiunto'])
-        && request.resource.data.aggiunto == request.time;
+      allow read, delete: if isOwner(uid);
     }
 
+    // Elenco dei membri storici: si modifica dalla console; ciascuno può togliersi
+    // (eliminazione dell'account).
+    match /membri/{uid} {
+      allow read: if isOwner(uid) || isLegacyMember();
+      allow delete: if isOwner(uid);
+      allow create, update: if false;
+    }
+
+    // Lista condivisa storica: invariata, solo per i membri storici.
     match /condivisi/{trail} {
-      allow read, delete: if isMember();
-      allow create, update: if isMember()
+      allow read, delete: if isLegacyMember();
+      allow create, update: if isLegacyMember()
         && validTrail(trail)
         && request.resource.data.keys().hasOnly(['aggiunto', 'da'])
         && request.resource.data.da == request.auth.uid

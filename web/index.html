@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#FFFFFF" />
+    <meta name="theme-color" content="#0B6E84" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B6E84'/%3E%3Cpath d='M5 24 13 11l4.5 7 3-4.5L27 24z' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E"
@@ -14,14 +14,18 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
     />
-    <title>Sentieri &amp; Drone</title>
+    <title>Quota 120</title>
+    <meta name="description" content="Quota 120: dove volare con il drone sui sentieri del Trentino, zone D-Flight, meteo e amici." />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/icon-180.png" />
+    <meta name="apple-mobile-web-app-title" content="Quota 120" />
   </head>
   <body>
     <!-- Barra superiore: su PC è l'header; su telefono galleggia sopra la mappa (ricerca + chip). -->
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark"><i data-icon="drone" data-size="20"></i></span>
-        <span class="brand-name">Sentieri <span>&amp;</span> Drone</span>
+        <span class="brand-name">Quota <span>120</span></span>
       </div>
 
       <div class="searchwrap">
@@ -55,6 +59,10 @@
         <button type="button" id="open-saved" class="btn-outline" aria-pressed="false">
           <i data-icon="bookmark" data-size="18"></i><span>SALVATI</span>
         </button>
+        <button type="button" id="open-profile" class="avatarbtn" aria-pressed="false" aria-label="Profilo" title="Profilo">
+          <span id="header-avatar" class="avatar-slot"><i data-icon="user" data-size="22"></i></span>
+          <i id="header-alert" class="alert-dot" hidden></i>
+        </button>
       </div>
     </header>
 
@@ -87,6 +95,14 @@
             <button type="button" id="results-map" class="btn-text">MAPPA</button>
           </div>
           <div class="view-body"><ul id="results-list" class="cards"></ul></div>
+        </section>
+
+        <section id="profile-view" class="view" hidden>
+          <div class="view-head">
+            <h2>Profilo</h2>
+            <button type="button" id="profile-close" class="iconbtn mobile-only" aria-label="Chiudi profilo"><i data-icon="close"></i></button>
+          </div>
+          <div class="view-body" id="profile-body"></div>
         </section>
 
         <section id="saved-view" class="view" hidden>
@@ -145,7 +161,14 @@
       <button type="button" class="tab" data-tab="map" aria-current="page"><i data-icon="map"></i><span>MAPPA</span></button>
       <button type="button" class="tab" data-tab="filters"><i data-icon="filter"></i><span>FILTRI</span><span id="tab-count" class="count mono" hidden></span></button>
       <button type="button" class="tab" data-tab="saved"><i data-icon="bookmark"></i><span>SALVATI</span></button>
+      <button type="button" class="tab" data-tab="profile">
+        <span id="tab-avatar" class="avatar-slot"><i data-icon="user"></i></span><span>PROFILO</span>
+        <i id="tab-alert" class="alert-dot" hidden></i>
+      </button>
     </nav>
+
+    <!-- Primo accesso: tre schermate saltabili (nome, zona, droni) -->
+    <div id="onboarding" class="overlay" hidden></div>
 
     <div id="status" class="toast">Caricamento dati…</div>
     <script type="module" src="/src/main.ts"></script>

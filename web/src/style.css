@@ -20,6 +20,11 @@
   --on-giallo: #1a1400;
   --rosso: #e5484d;
   --lago: #5fa8c9;
+  /* Avvisi non di volo (scadenze, azioni distruttive): toni scuri, contrasto ≥ 4,5:1 */
+  --danger: #b42318;
+  --danger-tint: #fdecea;
+  --warning: #8a5a00;
+  --warning-tint: #fff6db;
 
   --r-panel: 14px;
   --r-btn: 12px;
@@ -732,7 +737,7 @@ a {
   right: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   height: calc(var(--tabbar-h) + var(--safe-b));
   padding-bottom: var(--safe-b);
   background: var(--panel);
@@ -1565,6 +1570,380 @@ a {
   text-align: center;
 }
 
+/* ------------------------------------------------------------ account e profilo (Fase 1 · A) */
+
+.avatar {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-family: var(--font-cond);
+  font-weight: 700;
+}
+
+.avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-slot {
+  display: inline-grid;
+  place-items: center;
+}
+
+.tab[aria-current='page'] .avatar {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.alert-dot {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 2px solid var(--panel);
+}
+
+.tab .alert-dot {
+  top: 10px;
+  right: calc(50% - 20px);
+}
+
+.avatarbtn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.avatarbtn[aria-pressed='true'] .avatar {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.avatarbtn .alert-dot {
+  top: 2px;
+  right: 2px;
+}
+
+.btn-outline.wide {
+  width: 100%;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-btn);
+  background: var(--panel);
+  color: var(--danger);
+  font-family: var(--font-cond);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.btn-danger.wide {
+  width: 100%;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.notice.attention {
+  border-color: var(--giallo);
+  background: var(--warning-tint);
+}
+
+.bad {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.soon {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.ok {
+  color: var(--muted);
+}
+
+.warn.small {
+  color: var(--danger);
+  font-weight: 500;
+  font-size: 13px;
+  min-height: 0;
+}
+
+.warn.small:empty {
+  display: none;
+}
+
+#profile-body > * + * {
+  margin-top: 18px;
+}
+
+#profile-body > section + section {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 12px;
+}
+
+.identity-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.identity .title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.identity .subtitle {
+  margin: 2px 0;
+}
+
+.identity .btn-text {
+  align-self: flex-start;
+}
+
+.identity-form,
+.droneform {
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field-k {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field input,
+.docrow input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  background: var(--panel);
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.field input:focus,
+.docrow input:focus {
+  outline: 2px solid var(--accent);
+  border-color: transparent;
+}
+
+.field .hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.card.editing {
+  display: block;
+  padding: 12px;
+  border-color: var(--accent);
+}
+
+.dronecard {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-btn);
+  background: var(--panel);
+}
+
+.drone-main {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.drone-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 13px;
+}
+
+.hangar .cards {
+  margin-bottom: 10px;
+}
+
+.docrow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.docrow:last-child {
+  border-bottom: 0;
+}
+
+.docrow-title {
+  display: block;
+  font-weight: 600;
+}
+
+.docrow .hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.docrow-input {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.docrow input {
+  width: 160px;
+}
+
+.tiles.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.account-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.sheet-foot.single {
+  grid-template-columns: 1fr;
+}
+
+/* ---- onboarding ---- */
+
+.overlay {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: end center;
+  padding: 0;
+  background: rgb(20 32 36 / 0.45);
+}
+
+.ob-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-height: 92dvh;
+  overflow-y: auto;
+  padding: 16px 16px calc(16px + var(--safe-b));
+  border-radius: 18px 18px 0 0;
+  background: var(--panel);
+}
+
+.ob-card .title {
+  margin: 0;
+}
+
+.ob-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ob-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.ob-dots i {
+  width: 22px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.ob-dots i.on {
+  background: var(--accent);
+}
+
+.ob-body {
+  display: grid;
+  gap: 12px;
+}
+
+.ob-body > p {
+  margin: 0;
+}
+
+.ob-foot {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ob-drone {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+}
+
 /* ==========================================================================
    Tablet e PC (≥ 768): header in alto, colonna sinistra fissa
    ========================================================================== */
@@ -1819,6 +2198,19 @@ a {
   .chip {
     white-space: nowrap;
     flex: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .overlay {
+    place-items: center;
+    padding: 24px;
+  }
+
+  .ob-card {
+    width: 480px;
+    border-radius: var(--r-panel);
+    padding: 20px;
   }
 }
 
