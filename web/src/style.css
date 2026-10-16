@@ -1755,6 +1755,7 @@ button:disabled {
 }
 
 .field input,
+.field select,
 .docrow input {
   width: 100%;
   min-height: 44px;
@@ -1869,6 +1870,419 @@ button:disabled {
 
 .sheet-foot.single {
   grid-template-columns: 1fr;
+}
+
+/* ------------------------------------------------------------ bacheche (Fase 1 · B) */
+
+.cover {
+  height: 10px;
+  border-radius: 6px;
+  background: var(--accent);
+}
+
+.cover.tall {
+  height: 56px;
+  border-radius: var(--r-tile);
+}
+
+.cover.trail {
+  height: auto;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  background: var(--panel2);
+}
+
+.cover.trail .flightbar {
+  grid-column: 1 / -1;
+}
+
+.cover-title {
+  font-family: var(--font-cond);
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.boardcard .card-main {
+  gap: 8px;
+}
+
+.stack {
+  display: flex;
+  align-items: center;
+}
+
+.stack .avatar {
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+.stack .avatar + .avatar {
+  margin-left: -6px;
+}
+
+.board-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#board-body > * + * {
+  margin-top: 16px;
+}
+
+#board-body > section + section,
+#board-body > section + .btn-danger {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+#board-body .section-label {
+  margin-bottom: 8px;
+}
+
+.card.item {
+  align-items: flex-start;
+}
+
+.item-body {
+  flex: 1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 4px 12px 12px;
+}
+
+.linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.linkish:hover {
+  color: var(--accent);
+}
+
+.datefield {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.datefield input {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--panel);
+}
+
+.cisto {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.cisto-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--accent);
+  font-family: var(--font-cond);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.cisto-btn.on {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.notes {
+  display: grid;
+  gap: 8px;
+}
+
+.note {
+  padding: 8px 10px;
+  border-radius: var(--r-tile);
+  background: var(--panel2);
+}
+
+.note p {
+  margin: 4px 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.note-head .iconbtn {
+  margin-left: auto;
+  width: 36px;
+  height: 36px;
+}
+
+.noteform {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.noteform textarea,
+.row-input input,
+.invite-section input[type='search'],
+.invite-section input[type='text'],
+.settings select,
+.members select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  background: var(--panel);
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  resize: vertical;
+}
+
+.members select {
+  width: auto;
+  min-height: 40px;
+  font-size: 14px;
+}
+
+.members,
+.people,
+.linklist2,
+.pickerlist {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.members li,
+.people li,
+.pickerlist li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--line);
+}
+
+.member-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.linklist2 li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--line);
+}
+
+.linklist2 li > :nth-child(2) {
+  flex: 1;
+}
+
+.invite-section,
+.settings {
+  display: grid;
+  gap: 12px;
+}
+
+.linkout:empty {
+  display: none;
+}
+
+.linkout {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--r-tile);
+  background: var(--accent-tint);
+}
+
+.linkout input {
+  font-family: var(--font-mono);
+  font-size: 13px !important;
+}
+
+.row-input {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  width: 44px;
+  height: 44px;
+  border: 3px solid var(--panel);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+
+.swatch[aria-checked='true'] {
+  box-shadow: 0 0 0 3px var(--ink);
+}
+
+.boardform {
+  display: grid;
+  gap: 12px;
+}
+
+.card.invite {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-color: var(--accent);
+}
+
+.invite-body {
+  display: grid;
+  gap: 2px;
+}
+
+.picker {
+  gap: 12px;
+}
+
+.pickerlist .cover {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 8px;
+}
+
+.pickerlist .cover.trail {
+  display: block;
+  padding: 0;
+  background: var(--panel2);
+}
+
+.pickerlist .cover.trail > :not(.flightbar) {
+  display: none;
+}
+
+.pickerlist .cover.trail .flightbar {
+  margin-top: 15px;
+}
+
+.ok-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- campanella e notifiche ---- */
+
+.bellbtn {
+  position: relative;
+}
+
+.bellbtn .count {
+  top: 2px;
+  right: 2px;
+}
+
+.bellbtn[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.tab #tab-notif-count {
+  top: 6px;
+  right: calc(50% - 30px);
+}
+
+.notifs {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notif {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 2px 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notif .mono {
+  grid-column: 2;
+}
+
+.notif-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 6px;
+  border-radius: 50%;
+}
+
+.unread .notif-dot {
+  background: var(--accent);
+}
+
+.unread .notif-text {
+  font-weight: 600;
+}
+
+.notif:hover {
+  background: var(--panel2);
+}
+
+.iconbtn.small {
+  width: 36px;
+  height: 36px;
 }
 
 /* ---- onboarding ---- */

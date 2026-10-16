@@ -127,13 +127,24 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
   - Gli avvisi "Cross-Origin-Opener-Policy … window.closed" in console durante il login con popup sono noti e innocui.
 - **Fase 6** ✅ redesign grafico (solo estetica e layout). Regole in "Design" qui sotto.
 - **Roadmap Fase 1 · passo A** ✅ nome "Quota 120", manifest PWA (`web/public/`), login aperto, profilo, onboarding, hangar, scadenze. Vedi "Account" qui sotto.
+- **Roadmap Fase 1 · passo B** ✅ bacheche condivise con ruoli, inviti (link e ricerca per nome), "ci sto", note, notifiche in-app, migrazione di "Condivisi". Vedi "Bacheche" qui sotto.
 
 ## Account (Roadmap Fase 1 · A)
 
 - `web/src/account.ts`: Firebase Auth (Google, popup) + Firestore. Caricato solo quando serve (import dinamico; subito all'avvio se il dispositivo aveva già fatto login, flag `salvati-attivo`). Profilo creato in automatico al primo login; migrazione automatica `utenti/{uid}/salvati` → `users/{uid}/saved` (vecchi documenti lasciati).
-- Dati per utente: `users/{uid}` (profilo + scadenze documenti), `users/{uid}/saved`, `users/{uid}/droni`. La lista `condivisi` resta riservata ai membri storici (`membri/{uid}`) fino alle bacheche del passo B.
-- `web/src/profilepage.ts`: pagina profilo, hangar (preset modelli DJI → classe e peso), documenti pilota, avvisi a 30 giorni (`WARN_DAYS`), onboarding 3 passi, elimina account.
-- Mentre un modulo del profilo è aperto, gli aggiornamenti da Firestore non ridisegnano la pagina (`renderProfileView(force)`).
+- `web/src/fb.ts`: inizializzazione Firebase condivisa (app, auth, db, emulatori).
+- Dati per utente: `users/{uid}` (profilo + scadenze documenti + `cercabile`), `users/{uid}/saved`, `users/{uid}/droni`, `users/{uid}/bacheche` (indice), `users/{uid}/notifiche`. La vecchia lista `condivisi` è ora in sola lettura (fonte della migrazione).
+- `web/src/profilepage.ts`: pagina profilo, hangar (preset modelli in `web/src/drones.ts`, ~36 modelli DJI/Autel/Potensic/HoverAir + "Altro" libero), documenti pilota, avvisi a 30 giorni (`WARN_DAYS`), onboarding 3 passi, privacy (visibile nella ricerca), elimina account.
+- Date documenti: valide solo tra 2000-01-01 e il 31/12 di (anno corrente + 10), stesso limite nelle regole. Si salvano solo date complete (su `change` valido o blur): durante la digitazione l'anno passa da 0002/0020/0203 e salvare ogni passo ridisegnava la pagina (bug "non riesco a mettere 2031").
+- Mentre un modulo del profilo è aperto o una data è incompleta, gli aggiornamenti da Firestore non ridisegnano la pagina (`renderProfileView(force)`).
+
+## Bacheche (Roadmap Fase 1 · B)
+
+- `web/src/boards.ts` (dati e API) + `web/src/boardsui.ts` (viste: elenco, bacheca, selettore "Aggiungi a bacheca", notifiche, invito da link). Esportato da `account.ts`.
+- Modello: `boards/{b}` + `partecipanti`, `sentieri` (con `data` e mappa `ciSto`), `note`, `links/{token}`; `inviti/{b}_{uid}`; `profili/{uid}` (rubrica pubblica per la ricerca, opt-out). Dettagli in [docs/ACCOUNT.md](docs/ACCOUNT.md).
+- Niente Cloud Functions: la sicurezza degli inviti sta nelle regole (token non indovinabile, scadenza ≤ 30 giorni, revoca; si entra solo con link valido o invito diretto). Le notifiche le scrive chi compie l'azione, nello stesso batch.
+- Corse note: subito dopo la creazione l'ascolto della bacheca può ricevere permission-denied finché il server non ha confermato. `watchBoard` aspetta che non ci siano scritture in sospeso e verifica con `getDocFromServer` prima di scartarla.
+- Migrazione: pulsante "TRASFORMA IN BACHECA" visibile ai membri storici finché non esiste la bacheca `condivisi`; chi lo preme diventa proprietario.
 - `firestore.rules`: ogni utente legge/scrive solo i propri dati, campi in whitelist (`hasOnly`), lunghezze, date AAAA-MM-GG, classe/peso validati, timestamp del server. **Vanno pubblicate a mano dalla console** dopo ogni modifica. Guida e modello dati: [docs/ACCOUNT.md](docs/ACCOUNT.md).
 - Prove: emulatori Firebase (Java 21 + `firebase-tools`), `?emulatori` su localhost collega l'app agli emulatori (progetto `demo-quota120`). Mai email o dati personali nel repo.
 

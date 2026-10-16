@@ -15,7 +15,16 @@
 | `users/{uid}` | `nome`, `zona`, `avatar` (foto Google), `onboarding`, `migrato`, `attestato_scadenza`, `dflight_scadenza` (AAAA-MM-GG), `creato`, `aggiornato` | solo l'utente |
 | `users/{uid}/saved/{sentiero}` | sentieri salvati ("I miei"), `aggiunto` | solo l'utente |
 | `users/{uid}/droni/{id}` | `modello`, `classe` (C0/C1/C2/legacy), `peso_g`, `assicurazione_scadenza` | solo l'utente |
-| `condivisi/{sentiero}` | lista condivisa storica (`da`, `aggiunto`) | solo i **membri storici** |
+| `users/{uid}/bacheche/{b}` | indice delle bacheche dell'utente | solo l'utente |
+| `users/{uid}/notifiche/{n}` | notifiche in-app (inviti, ingressi, sentieri, ci sto, note), `letta` | solo l'utente (gli altri possono solo crearle, legate a una bacheca comune) |
+| `profili/{uid}` | rubrica per la ricerca per nome: `nome`, `avatar` | utenti con login; si toglie con "Visibile nella ricerca" nel profilo |
+| `boards/{b}` | bacheca: `nome`, `copertina` (colore o sentiero), `owner` | solo i membri |
+| `boards/{b}/partecipanti/{uid}` | `ruolo` (owner / editor / viewer), `nome`, `avatar`, `via` | solo i membri |
+| `boards/{b}/sentieri/{id}` | `da`, `aggiunto`, `data` prevista, `ciSto` | membri; scrive solo chi "può modificare" |
+| `boards/{b}/note/{n}` | note del gruppo (max 1000 caratteri) | membri; scrive chi "può modificare" |
+| `boards/{b}/links/{token}` | link d'invito: `ruolo`, `scade` (max 30 giorni), `revocato` | il proprietario; chi ha il link legge solo quello |
+| `inviti/{b}_{uid}` | invito diretto per nome (scade in 30 giorni) | invitato e proprietario |
+| `condivisi/{sentiero}` | lista condivisa storica, **sola lettura** (fonte della migrazione) | solo i **membri storici** |
 | `membri/{uid}` | membri storici (`nome`), aggiunti a mano dalla console | i membri storici |
 | `utenti/{uid}/salvati/…` | **vecchia** posizione dei salvati (prima del passo A) | solo l'utente, sola lettura |
 
@@ -27,7 +36,14 @@ Al primo accesso dopo l'aggiornamento, l'app copia `utenti/{uid}/salvati/*` in `
 
 ### Lista condivisa storica
 
-Resta com'era: visibile e modificabile solo da chi è nella raccolta `membri`. Gli utenti nuovi non la vedono (il pulsante "Condivisi" compare solo ai membri storici). Al passo B diventerà la prima **bacheca** con inviti, e la raccolta `membri` non servirà più.
+Dal passo B è in sola lettura. Nei Salvati i membri storici vedono il pulsante **TRASFORMA IN BACHECA** finché la bacheca non esiste: chi lo preme per primo ne diventa **proprietario**, tutti i sentieri passano nella bacheca e gli altri membri storici vi entrano in automatico come "può modificare".
+
+## Bacheche e inviti (senza Cloud Functions)
+
+- Chiunque abbia fatto login crea bacheche. Ruoli: **proprietario**, **può modificare** (aggiunge/toglie sentieri, data, note, ci sto), **può solo vedere**.
+- **Invito con link**: il proprietario sceglie ruolo e scadenza (1, 7 o 30 giorni); il link contiene un codice casuale di 24 caratteri, non indovinabile. Le regole controllano scadenza e revoca: un link scaduto o revocato non fa entrare nessuno.
+- **Invito per nome**: cerca nella rubrica `profili`. L'invitato vede solo nome della bacheca e di chi invita, finché non accetta.
+- Il proprietario cambia i ruoli e toglie membri; un membro può uscire. Eliminare la bacheca cancella tutto il contenuto.
 
 ## Regole di sicurezza
 
@@ -37,11 +53,11 @@ Il file [`firestore.rules`](../firestore.rules) è la copia di riferimento. **Va
 2. Seleziona tutto il testo e sostituiscilo con il contenuto di `firestore.rules` (su GitHub: apri il file → pulsante *Copy raw file*).
 3. **Pubblica**. Ha effetto entro un minuto.
 
-Le regole sono provate sull'emulatore Firebase (36 casi: accessi incrociati, campi non previsti, date e pesi non validi, lista storica, eliminazione).
+Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 sulle bacheche: chi non è membro non legge nulla, chi può solo vedere non scrive, link scaduti o revocati falliscono, nessuno entra senza invito valido, date fino a +10 anni).
 
 ## Eliminazione account
 
-"Elimina account" nel profilo cancella: profilo, droni, salvati, vecchi salvati, i sentieri che l'utente ha aggiunto alla lista condivisa, la sua iscrizione ai membri storici, e infine l'account di accesso. Google può chiedere di confermare l'accesso con un popup.
+"Elimina account" nel profilo cancella: le bacheche di cui è proprietario (con tutto il contenuto), la sua partecipazione alle altre, inviti e notifiche, la voce nella rubrica, profilo, droni, salvati, vecchi salvati, la sua iscrizione ai membri storici, e infine l'account di accesso. Google può chiedere di confermare l'accesso con un popup.
 
 ## Prove in locale con gli emulatori
 

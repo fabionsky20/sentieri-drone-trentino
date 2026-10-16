@@ -2,28 +2,13 @@
 // REGOLA FISSA: qui non si chiede, registra o mostra mai la quota a cui si è volato.
 
 import type { AccountState, Drone, DroneClass, DroneInput, Profile, ProfilePatch } from './account'
-import { segmented } from './filters'
+import { DRONE_PRESETS, findPreset } from './drones'
+import { segmented, switchRow } from './filters'
 import { dotDate, h } from './panel'
 import { icon } from './ui'
 
 export const WARN_DAYS = 30
 
-/** Modelli comuni: compilano classe e peso quando si sceglie il modello. */
-const PRESETS: { modello: string; classe: DroneClass; peso_g: number }[] = [
-  { modello: 'DJI Mini 4 Pro', classe: 'C0', peso_g: 249 },
-  { modello: 'DJI Mini 3 Pro', classe: 'C0', peso_g: 249 },
-  { modello: 'DJI Mini 3', classe: 'C0', peso_g: 248 },
-  { modello: 'DJI Mini 2', classe: 'legacy', peso_g: 249 },
-  { modello: 'DJI Mini 2 SE', classe: 'C0', peso_g: 246 },
-  { modello: 'DJI Mini 4K', classe: 'C0', peso_g: 249 },
-  { modello: 'DJI Mini SE', classe: 'legacy', peso_g: 249 },
-  { modello: 'DJI Neo', classe: 'C0', peso_g: 135 },
-  { modello: 'DJI Flip', classe: 'C0', peso_g: 249 },
-  { modello: 'DJI Air 3', classe: 'C1', peso_g: 720 },
-  { modello: 'DJI Air 3S', classe: 'C1', peso_g: 724 },
-  { modello: 'DJI Mavic 3 Classic', classe: 'C1', peso_g: 895 },
-  { modello: 'DJI Avata 2', classe: 'C1', peso_g: 377 },
-]
 const CLASSI: DroneClass[] = ['C0', 'C1', 'C2', 'legacy']
 
 export interface ProfileActions {
@@ -31,6 +16,7 @@ export interface ProfileActions {
   logout: () => void
   retry: () => void
   updateProfile: (p: ProfilePatch) => Promise<void>
+  setSearchable: (on: boolean) => Promise<void>
   saveDrone: (d: DroneInput, id?: string) => Promise<void>
   removeDrone: (id: string) => Promise<void>
   deleteAccount: () => Promise<void>
@@ -114,11 +100,27 @@ function textInput(value: string | null, attrs: Record<string, string> = {}): HT
   return el
 }
 
+// Date di scadenza accettate: dal 2000 a 10 anni nel futuro (l'attestato A1/A3 dura 5 anni).
+// Stesso limite nelle regole di Firestore.
+export const DATE_MAX_YEARS = 10
+export const DATE_MIN = '2000-01-01'
+export const dateMax = () => `${new Date().getFullYear() + DATE_MAX_YEARS}-12-31`
+
+/** Data completa e nell'intervallo ammesso? (Vuota = "non indicata", valida.) */
+export function validDate(v: string): boolean {
+  if (!v) return true
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false
+  const [y, m, d] = v.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  return dt.getMonth() === m - 1 && v >= DATE_MIN && v <= dateMax()
+}
+
 function dateInput(value: string | null): HTMLInputElement {
-  const el = h('input', { type: 'date' }) as HTMLInputElement
+  const el = h('input', { type: 'date', min: DATE_MIN, max: dateMax() }) as HTMLInputElement
   el.value = value ?? ''
   return el
 }
+
 
 function datalist(id: string, values: string[]): HTMLElement {
   const dl = h('datalist', { id })
@@ -145,7 +147,20 @@ async function busy(btn: HTMLButtonElement, fn: () => Promise<void>, errorBox: H
 
 function droneForm(initial: Drone | null, onSave: (d: DroneInput) => Promise<void>, onCancel: (() => void) | null): HTMLElement {
   const err = h('p', { class: 'warn small' })
-  const modello = textInput(initial?.modello ?? '', { list: 'dl-droni', placeholder: 'es. DJI Mini 4 Pro', maxlength: '60', autocomplete: 'off' })
+  // Menu dei modelli più diffusi + "Altro" con campo libero.
+  const known = initial ? findPreset(initial.modello) : undefined
+  const select = h('select', { 'aria-label': 'Modello' }) as HTMLSelectElement
+  select.append(h('option', { value: '' }, 'Scegli il modello…'))
+  for (const g of DRONE_PRESETS) {
+    const og = h('optgroup', { label: g.marca })
+    for (const p of g.modelli) og.append(h('option', { value: p.modello }, p.modello))
+    select.append(og)
+  }
+  select.append(h('option', { value: '__altro' }, 'Altro (scrivi a mano)'))
+  const modello = textInput(initial?.modello ?? '', { placeholder: 'es. DJI Mini 4 Pro', maxlength: '60', autocomplete: 'off' })
+  const altroBox = field('Modello (altro)', modello)
+  select.value = initial ? (known ? known.modello : '__altro') : ''
+  altroBox.hidden = select.value !== '__altro'
   let classe: DroneClass = initial?.classe ?? 'C0'
   const classeBox = h('div', {})
   const drawClasse = () =>
@@ -156,10 +171,17 @@ function droneForm(initial: Drone | null, onSave: (d: DroneInput) => Promise<voi
   const peso = h('input', { type: 'number', inputmode: 'numeric', min: '1', max: '25000', placeholder: 'g' }) as HTMLInputElement
   if (initial) peso.value = String(initial.peso_g)
   const ass = dateInput(initial?.assicurazione_scadenza ?? null)
-  // Scegliendo un modello noto, classe e peso si compilano da soli.
-  modello.addEventListener('change', () => {
-    const p = PRESETS.find((x) => x.modello.toLowerCase() === modello.value.trim().toLowerCase())
+  // Scegliendo un modello noto, classe e peso si compilano da soli (restano modificabili).
+  select.addEventListener('change', () => {
+    altroBox.hidden = select.value !== '__altro'
+    if (select.value === '__altro') {
+      modello.value = known ? '' : modello.value
+      modello.focus()
+      return
+    }
+    const p = findPreset(select.value)
     if (!p) return
+    modello.value = p.modello
     classe = p.classe
     drawClasse()
     peso.value = String(p.peso_g)
@@ -168,9 +190,9 @@ function droneForm(initial: Drone | null, onSave: (d: DroneInput) => Promise<voi
   const form = h(
     'form',
     { class: 'droneform' },
-    datalist('dl-droni', PRESETS.map((p) => p.modello)),
-    field('Modello', modello),
-    field('Classe', classeBox, 'C0 < 250 g · "Legacy" = senza marcatura di classe'),
+    field('Modello', select),
+    altroBox,
+    field('Classe', classeBox, 'Valori indicativi: fa fede l’etichetta di classe sul drone. "Legacy" = senza marcatura'),
     h('div', { class: 'row2' }, field('Peso (g)', peso), field('Assicurazione: scadenza', ass)),
     err,
     h('div', { class: 'form-actions' }, save),
@@ -182,10 +204,11 @@ function droneForm(initial: Drone | null, onSave: (d: DroneInput) => Promise<voi
   }
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
-    const m = modello.value.trim()
+    const m = (select.value && select.value !== '__altro' ? select.value : modello.value).trim()
     const g = Number(peso.value)
-    if (!m) return void (err.textContent = 'Scrivi il modello.')
+    if (!m) return void (err.textContent = 'Scegli o scrivi il modello.')
     if (!Number.isFinite(g) || g < 1 || g > 25000) return void (err.textContent = 'Peso tra 1 e 25.000 g.')
+    if (!validDate(ass.value)) return void (err.textContent = `Scadenza dell’assicurazione tra il 2000 e il ${dateMax().slice(0, 4)}.`)
     await busy(save, () => onSave({ modello: m, classe, peso_g: g, assicurazione_scadenza: ass.value || null }), err)
   })
   return form
@@ -245,10 +268,32 @@ function documents(p: Profile, a: ProfileActions): HTMLElement {
       status.className = `mono small ${d < 0 ? 'bad' : d <= WARN_DAYS ? 'soon' : 'ok'}`
     }
     show()
-    input.addEventListener('change', async () => {
+    // Si salva solo una data completa e valida: mentre si digita l'anno il campo passa per
+    // valori come 0002 o 0203, che non vanno salvati.
+    let last = p[key] ?? ''
+    const commit = async () => {
+      if (input.value === last) return
+      if (!validDate(input.value)) {
+        status.textContent = `dal 2000 al ${dateMax().slice(0, 4)}`
+        status.className = 'mono small bad'
+        return
+      }
+      last = input.value
       show()
       await a.updateProfile({ [key]: input.value || null })
+    }
+    // Si salva appena la data è completa e valida (i valori a metà come 0002 o 0203 sono prima
+    // del 2000 e vengono ignorati), e comunque all'uscita dal campo.
+    input.addEventListener('change', () => {
+      if (input.value && validDate(input.value)) void commit()
     })
+    input.addEventListener('blur', async () => {
+      await commit()
+      // Uscendo dal campo si aggiorna la pagina (avvisi di scadenza), che mentre si scriveva
+      // era rimasta ferma apposta.
+      document.dispatchEvent(new CustomEvent('profilo-aggiorna'))
+    })
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && commit())
     return h('div', { class: 'docrow' }, h('div', {}, h('span', { class: 'docrow-title' }, title), h('span', { class: 'hint' }, hint)), h('div', { class: 'docrow-input' }, input, status))
   }
   return h(
@@ -295,7 +340,7 @@ function dangerZone(a: ProfileActions): HTMLElement {
   const err = h('p', { class: 'warn small' })
   del.addEventListener('click', async () => {
     const ok = confirm(
-      'Eliminare l’account?\n\nVerranno cancellati per sempre: profilo, hangar, sentieri salvati e i sentieri che hai aggiunto alla lista condivisa. Potrebbe esserti chiesto di confermare con Google.',
+      'Eliminare l’account?\n\nVerranno cancellati per sempre: profilo, hangar, sentieri salvati, le bacheche di cui sei proprietario (per tutti i membri) e la tua presenza nelle altre. Potrebbe esserti chiesto di confermare con Google.',
     )
     if (!ok) return
     await busy(del as HTMLButtonElement, a.deleteAccount, err)
@@ -336,6 +381,13 @@ export function renderProfilePage(st: AccountState | null, a: ProfileActions, re
     expiryBox(expiries(p, st.droni)),
     hangar(st, a, rerender),
     documents(p, a),
+    h(
+      'section',
+      {},
+      h('p', { class: 'section-label' }, 'Privacy'),
+      switchRow('Visibile nella ricerca degli amici', p.cercabile, (on) => void a.setSearchable(on).catch(() => {})),
+      h('p', { class: 'hint' }, 'Se attivo, chi usa Quota 120 può trovarti per nome (si vedono solo nome e foto) e invitarti nelle bacheche. Storico e statistiche restano privati.'),
+    ),
     h(
       'section',
       {},

@@ -59,6 +59,9 @@
         <button type="button" id="open-saved" class="btn-outline" aria-pressed="false">
           <i data-icon="bookmark" data-size="18"></i><span>SALVATI</span>
         </button>
+        <button type="button" id="open-notifs" class="iconbtn bellbtn" aria-pressed="false" aria-label="Notifiche" title="Notifiche" hidden>
+          <i data-icon="bell"></i><span id="notif-count" class="count mono" hidden></span>
+        </button>
         <button type="button" id="open-profile" class="avatarbtn" aria-pressed="false" aria-label="Profilo" title="Profilo">
           <span id="header-avatar" class="avatar-slot"><i data-icon="user" data-size="22"></i></span>
           <i id="header-alert" class="alert-dot" hidden></i>
@@ -100,9 +103,26 @@
         <section id="profile-view" class="view" hidden>
           <div class="view-head">
             <h2>Profilo</h2>
+            <button type="button" id="profile-notifs" class="iconbtn bellbtn mobile-only" aria-label="Notifiche"><i data-icon="bell"></i><span id="profile-notif-count" class="count mono" hidden></span></button>
             <button type="button" id="profile-close" class="iconbtn mobile-only" aria-label="Chiudi profilo"><i data-icon="close"></i></button>
           </div>
           <div class="view-body" id="profile-body"></div>
+        </section>
+
+        <section id="notifs-view" class="view" hidden>
+          <div class="view-head">
+            <h2>Notifiche</h2>
+            <button type="button" id="notifs-close" class="iconbtn" aria-label="Chiudi notifiche"><i data-icon="close"></i></button>
+          </div>
+          <div class="view-body" id="notifs-body"></div>
+        </section>
+
+        <section id="board-view" class="view" hidden>
+          <div class="view-head">
+            <button type="button" id="board-back" class="iconbtn" aria-label="Torna alle bacheche"><i data-icon="back"></i></button>
+            <h2 id="board-title">Bacheca</h2>
+          </div>
+          <div class="view-body" id="board-body"></div>
         </section>
 
         <section id="saved-view" class="view" hidden>
@@ -164,11 +184,15 @@
       <button type="button" class="tab" data-tab="profile">
         <span id="tab-avatar" class="avatar-slot"><i data-icon="user"></i></span><span>PROFILO</span>
         <i id="tab-alert" class="alert-dot" hidden></i>
+        <span id="tab-notif-count" class="count mono" hidden></span>
       </button>
     </nav>
 
     <!-- Primo accesso: tre schermate saltabili (nome, zona, droni) -->
     <div id="onboarding" class="overlay" hidden></div>
+
+    <!-- Finestre: scelta della bacheca, invito via link -->
+    <div id="modal" class="overlay" hidden></div>
 
     <div id="status" class="toast">Caricamento dati…</div>
     <script type="module" src="/src/main.ts"></script>

@@ -13,8 +13,10 @@ import { CATEGORIES, CATEGORY_ORDER, registerIcons } from './icons'
 import { catIcon, dotDate, formatDate, h, renderPoi, renderTrail, renderZones, trailCard } from './panel'
 import { photosSection } from './photos'
 import { renderProfile } from './profile'
-import type { AccountState, ListName } from './account'
-import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, type ProfileActions } from './profilepage'
+import type { AccountState } from './account'
+import type { BoardsState } from './boards'
+import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, type BoardsActions, type TrailInfo } from './boardsui'
+import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt } from './trailgeom'
 import type {
@@ -471,21 +473,30 @@ if (meta.snapshot) {
 // ---------------------------------------------------------------- navigazione (telefono) e colonne (PC)
 
 const side = $('side')
-type View = 'filters' | 'results' | 'saved' | 'profile'
+type View = 'filters' | 'results' | 'saved' | 'profile' | 'board' | 'notifs'
 type Tab = 'map' | 'filters' | 'saved' | 'profile'
+const VIEW_TAB: Record<View, Tab> = { filters: 'filters', results: 'filters', saved: 'saved', board: 'saved', profile: 'profile', notifs: 'profile' }
 
 function showView(view: View): void {
-  $('filters-view').hidden = view !== 'filters'
-  $('results-view').hidden = view !== 'results'
-  $('saved-view').hidden = view !== 'saved'
-  $('profile-view').hidden = view !== 'profile'
+  for (const v of ['filters', 'results', 'saved', 'profile', 'board', 'notifs'] as View[]) $(`${v}-view`).hidden = v !== view
   side.dataset.view = view
-  $('open-saved').setAttribute('aria-pressed', String(view === 'saved'))
+  $('open-saved').setAttribute('aria-pressed', String(view === 'saved' || view === 'board'))
   $('open-profile').setAttribute('aria-pressed', String(view === 'profile'))
-  if (view === 'saved' || view === 'profile') {
+  $('open-notifs').setAttribute('aria-pressed', String(view === 'notifs'))
+  if (view !== 'filters' && view !== 'results') {
     loadAccount()
     renderSavedSheet()
     renderProfileView()
+    renderBoardView()
+    renderNotifsView()
+  }
+  markTab(VIEW_TAB[view])
+}
+
+function markTab(tab: Tab): void {
+  for (const b of document.querySelectorAll<HTMLElement>('.tab')) {
+    if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page')
+    else b.removeAttribute('aria-current')
   }
 }
 
@@ -496,22 +507,33 @@ function setTab(tab: Tab): void {
     select(null)
     showView(tab)
   }
-  for (const b of document.querySelectorAll<HTMLElement>('.tab')) {
-    if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page')
-    else b.removeAttribute('aria-current')
-  }
+  markTab(tab)
 }
+
+/** Apre una vista della colonna (PC) o a tutto schermo (telefono). */
+function openView(view: View): void {
+  if (mobile()) {
+    side.dataset.open = 'true'
+    select(null)
+  }
+  showView(view)
+}
+
 for (const b of document.querySelectorAll<HTMLElement>('.tab')) b.addEventListener('click', () => setTab(b.dataset.tab as Tab))
 $('open-filters').addEventListener('click', () => setTab('filters'))
 $('filters-close').addEventListener('click', () => setTab('map'))
 $('saved-close').addEventListener('click', () => setTab('map'))
 $('profile-close').addEventListener('click', () => setTab('map'))
+$('notifs-close').addEventListener('click', () => (mobile() ? showView('profile') : showView('filters')))
+$('board-back').addEventListener('click', () => showView('saved'))
 $('show-results').addEventListener('click', () => showView('results'))
 $('results-back').addEventListener('click', () => showView('filters'))
 $('results-map').addEventListener('click', () => setTab('map'))
-// PC: il pulsante SALVATI alterna Filtri e Salvati nella colonna sinistra.
+// PC: i pulsanti dell'header alternano la colonna sinistra con i Filtri.
 $('open-saved').addEventListener('click', () => showView(side.dataset.view === 'saved' ? 'filters' : 'saved'))
 $('open-profile').addEventListener('click', () => showView(side.dataset.view === 'profile' ? 'filters' : 'profile'))
+$('open-notifs').addEventListener('click', () => showView(side.dataset.view === 'notifs' ? 'filters' : 'notifs'))
+$('profile-notifs').addEventListener('click', () => showView('notifs'))
 showView('filters')
 
 // ---------------------------------------------------------------- scheda
@@ -694,7 +716,7 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
   return trailCard(t, {
     km: kmOf(t.id),
     closed: closedIds.has(t.id),
-    saved: !!(acct?.miei.has(t.id) || acct?.condivisi.has(t.id)),
+    saved: !!acct?.miei.has(t.id) || inBoards(t.id),
     ...extra,
     onOpen: () => {
       select({ kind: 'trail', id: t.id })
@@ -712,7 +734,7 @@ function applyFilters(): void {
       km: kmOf(t.id),
       closed: closedIds.has(t.id),
       mine: acct?.miei.has(t.id) ?? false,
-      shared: acct?.condivisi.has(t.id) ?? false,
+      shared: inBoards(t.id),
     }
     if (matches(t, ctx, filters)) {
       ok.add(t.id)
@@ -876,14 +898,18 @@ for (const layer of ['seg-hit', 'zone-fill', 'poi-icons']) {
   map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''))
 }
 
-// ---------------------------------------------------------------- account: login, profilo, salvati (Firebase)
+// ---------------------------------------------------------------- account: login, profilo, salvati, bacheche (Firebase)
 
 // Il modulo Firebase si scarica solo quando serve: al primo uso di Salva/Salvati/Profilo, oppure
-// subito all'avvio se su questo dispositivo era già stato fatto il login.
+// subito all'avvio se su questo dispositivo era già stato fatto il login (o se si apre un invito).
 let acct: AccountState | null = null
+let boardsSt: BoardsState | null = null
 let accountModule: Promise<typeof import('./account')> | null = null
 let currentSave: { trailId: string; box: HTMLElement } | null = null
-let savedTab: ListName = 'miei'
+type SavedTab = 'miei' | 'bacheche'
+let savedTab: SavedTab = 'miei'
+let currentBoard: string | null = null
+const boardUi = new Map<string, { openNotes: Set<string>; lastLink: { url: string | null } }>()
 let onboardingStep = 0
 let onboardingClosed = false // saltato in questa visita, in attesa che arrivi il salvataggio
 
@@ -891,7 +917,7 @@ function loadAccount(): Promise<typeof import('./account')> {
   if (!accountModule) {
     accountModule = import('./account')
     accountModule
-      .then((m) =>
+      .then((m) => {
         m.subscribe((st) => {
           acct = st
           store('salvati-attivo', st.status !== 'anonimo')
@@ -901,8 +927,18 @@ function loadAccount(): Promise<typeof import('./account')> {
           renderAvatars()
           renderOnboarding()
           applyFilters()
-        }),
-      )
+          handleInviteLink()
+        })
+        m.subscribeBoards((bs) => {
+          boardsSt = bs
+          renderSaveBox()
+          renderSavedSheet()
+          renderBoardView()
+          renderNotifsView()
+          renderBells()
+          applyFilters()
+        })
+      })
       .catch((e) => {
         accountModule = null
         showToast(`Impossibile caricare il servizio account: ${e.message}`)
@@ -911,9 +947,16 @@ function loadAccount(): Promise<typeof import('./account')> {
   return accountModule
 }
 
+/** Il sentiero è in almeno una delle mie bacheche? */
+const inBoards = (trailId: string) => !!boardsSt && [...boardsSt.boards.values()].some((b) => b.sentieri.has(trailId))
+
 function openSaved(): void {
-  if (mobile()) setTab('saved')
-  else showView('saved')
+  openView('saved')
+}
+
+function openBoard(id: string): void {
+  currentBoard = id
+  openView('board')
 }
 
 async function doLogin(): Promise<void> {
@@ -936,6 +979,7 @@ const accountActions = (): ProfileActions => ({
   logout: () => void loadAccount().then((m) => m.logout()),
   retry: () => void loadAccount().then((m) => m.retry()),
   updateProfile: async (p) => (await loadAccount()).updateProfile(p),
+  setSearchable: async (on) => (await loadAccount()).setSearchable(on),
   saveDrone: async (d, id) => (await loadAccount()).saveDrone(d, id),
   removeDrone: async (id) => (await loadAccount()).removeDrone(id),
   deleteAccount: async () => {
@@ -947,25 +991,95 @@ const accountActions = (): ProfileActions => ({
   ),
 })
 
-async function toggleSaved(list: ListName, trailId: string): Promise<void> {
+const trailInfo = (): TrailInfo => ({ trails, kmOf, closed: (id) => closedIds.has(id) })
+
+const boardsActions = (): BoardsActions => {
+  const m = () => loadAccount()
+  return {
+    openBoard,
+    openTrail: (id) => {
+      const t = trails.get(id)
+      if (!t) return
+      if (mobile()) setTab('map')
+      select({ kind: 'trail', id })
+      fitTrail(t)
+    },
+    createBoard: async (nome, cop) => (await m()).createBoard(nome, cop),
+    updateBoard: async (id, p) => (await m()).updateBoard(id, p),
+    deleteBoard: async (id) => {
+      await (await m()).deleteBoard(id)
+      showView('saved')
+    },
+    leaveBoard: async (id) => {
+      await (await m()).leaveBoard(id)
+      showView('saved')
+    },
+    setRole: async (id, uid, r) => (await m()).setRole(id, uid, r),
+    removeMember: async (id, uid) => (await m()).removeMember(id, uid),
+    addTrail: async (id, t) => (await m()).addTrail(id, t),
+    removeTrail: async (id, t) => (await m()).removeTrail(id, t),
+    setTrailDate: async (id, t, d) => (await m()).setTrailDate(id, t, d),
+    setCiSto: async (id, t, on) => (await m()).setCiSto(id, t, on),
+    addNote: async (id, t, x) => (await m()).addNote(id, t, x),
+    deleteNote: async (id, n) => (await m()).deleteNote(id, n),
+    createLink: async (id, r, d) => (await m()).createLink(id, r, d),
+    revokeLink: async (id, t) => (await m()).revokeLink(id, t),
+    searchUsers: async (q) => (await m()).searchUsers(q),
+    inviteUser: async (id, u, r) => (await m()).inviteUser(id, u, r),
+    cancelInvite: async (i) => (await m()).cancelInvite(i),
+    acceptInvite: async (i) => (await m()).acceptInvite(i),
+    declineInvite: async (i) => (await m()).declineInvite(i),
+    migrateLegacy: async () => (await m()).migrateLegacy(acct?.membri ?? new Map(), acct?.condivisi ?? new Map()),
+    markRead: async (id) => (await m()).markRead(id),
+    markAllRead: async () => (await m()).markAllRead(),
+    toast: showToast,
+  }
+}
+
+async function toggleMine(trailId: string): Promise<void> {
   const m = await loadAccount()
   if (acct?.status !== 'pronto') {
     openSaved()
     return
   }
-  if (list === 'condivisi' && !acct.legacyMember) {
-    showToast('La lista condivisa diventerà una bacheca con inviti nel prossimo aggiornamento.')
-    return
-  }
-  const has = list === 'miei' ? acct.miei.has(trailId) : acct.condivisi.has(trailId)
   try {
-    await (has ? m.remove(list, trailId) : m.save(list, trailId))
+    await (acct.miei.has(trailId) ? m.remove('miei', trailId) : m.save('miei', trailId))
   } catch (e) {
     showToast(`Salvataggio non riuscito: ${(e as Error).message}`)
   }
 }
 
-/** Pulsanti fissi in fondo alla scheda: SALVA NEI MIEI (pieno) e CONDIVISI (bordo, solo membri storici). */
+// ---- finestra (scelta bacheca, invito via link)
+
+const modal = $('modal')
+function openModal(content: HTMLElement): void {
+  modal.replaceChildren(content)
+  modal.hidden = false
+}
+function closeModal(): void {
+  modal.hidden = true
+  modal.replaceChildren()
+}
+modal.addEventListener('click', (e) => e.target === modal && closeModal())
+
+let pickerTrail: string | null = null
+function renderPicker(): void {
+  if (modal.hidden || !pickerTrail || !boardsSt) return
+  openModal(renderBoardPicker(pickerTrail, boardsSt, trailInfo(), boardsActions(), () => ((pickerTrail = null), closeModal())))
+}
+
+async function openBoardPicker(trailId: string): Promise<void> {
+  await loadAccount()
+  if (acct?.status !== 'pronto') {
+    openSaved()
+    return
+  }
+  pickerTrail = trailId
+  modal.hidden = false
+  renderPicker()
+}
+
+/** Pulsanti fissi in fondo alla scheda: SALVA NEI MIEI (pieno) e AGGIUNGI A BACHECA (bordo). */
 function renderSaveBox(): void {
   if (!currentSave) {
     foot.hidden = true
@@ -974,18 +1088,15 @@ function renderSaveBox(): void {
   }
   const { trailId } = currentSave
   const mine = !!acct?.miei.has(trailId)
-  const shared = !!acct?.condivisi.has(trailId)
+  const shared = inBoards(trailId)
   const b1 = h('button', { type: 'button', class: 'btn-primary', 'aria-pressed': String(mine) }, icon(mine ? 'bookmarkFilled' : 'bookmark', 18), mine ? 'NEI MIEI' : 'SALVA NEI MIEI')
-  b1.addEventListener('click', () => toggleSaved('miei', trailId))
-  const buttons = [b1]
-  if (acct?.legacyMember) {
-    const b2 = h('button', { type: 'button', class: 'btn-outline', 'aria-pressed': String(shared) }, icon(shared ? 'bookmarkFilled' : 'bookmark', 18), shared ? 'IN CONDIVISI' : 'CONDIVISI')
-    b2.addEventListener('click', () => toggleSaved('condivisi', trailId))
-    buttons.push(b2)
-  }
-  foot.classList.toggle('single', buttons.length === 1)
-  foot.replaceChildren(...buttons)
+  b1.addEventListener('click', () => toggleMine(trailId))
+  const b2 = h('button', { type: 'button', class: 'btn-outline', 'aria-pressed': String(shared) }, icon(shared ? 'check' : 'users', 18), 'AGGIUNGI A BACHECA')
+  b2.addEventListener('click', () => void openBoardPicker(trailId))
+  foot.classList.remove('single')
+  foot.replaceChildren(b1, b2)
   foot.hidden = false
+  renderPicker()
 }
 
 function loginPrompt(text: string): HTMLElement[] {
@@ -994,7 +1105,7 @@ function loginPrompt(text: string): HTMLElement[] {
   return [h('div', { class: 'empty-state' }, icon('bookmark', 28), h('p', {}, text)), b]
 }
 
-/** Contenuto della sezione "Salvati" secondo lo stato del login. */
+/** Sezione "Salvati": inviti ricevuti, poi "I miei" e le bacheche. */
 function renderSavedSheet(): void {
   if ($('saved-view').hidden) return
   const st = acct
@@ -1002,56 +1113,88 @@ function renderSavedSheet(): void {
   if (!st || st.status === 'caricamento') {
     parts.push(h('p', { class: 'muted' }, 'Caricamento…'))
   } else if (st.status === 'anonimo') {
-    parts.push(...loginPrompt("Accedi per salvare i sentieri e ritrovarli sincronizzati su telefono e PC. L'accesso resta attivo: non serve rifarlo ogni volta."))
+    parts.push(...loginPrompt("Accedi per salvare i sentieri, creare bacheche con gli amici e ritrovare tutto su telefono e PC. L'accesso resta attivo: non serve rifarlo ogni volta."))
   } else if (st.status === 'errore') {
     const b = h('button', { type: 'button', class: 'btn-primary' }, 'RIPROVA')
     b.addEventListener('click', () => loadAccount().then((m) => m.retry()))
     parts.push(h('p', { class: 'warn' }, `Errore: ${st.errore}`), b)
   } else {
-    if (!st.legacyMember) savedTab = 'miei'
-    if (st.legacyMember) {
-      parts.push(
-        segmented<ListName>(
-          [
-            ['miei', `I miei · ${st.miei.size}`],
-            ['condivisi', `Condivisi · ${st.condivisi.size}`],
-          ],
-          savedTab,
-          (v) => {
-            savedTab = v
-            renderSavedSheet()
-          },
-        ),
-      )
-    } else {
-      parts.push(h('p', { class: 'section-label' }, `I miei · ${st.miei.size}`))
+    const bs = boardsSt
+    const a = boardsActions()
+    const inv = bs ? inviteCards(bs.inviti, a) : null
+    if (inv) parts.push(h('p', { class: 'section-label' }, `Inviti ricevuti · ${bs!.inviti.length}`), inv)
+    if (bs?.migrabile && st.legacyMember) parts.push(migrationBanner(a))
+    parts.push(
+      segmented<SavedTab>(
+        [
+          ['miei', `I miei · ${st.miei.size}`],
+          ['bacheche', `Bacheche · ${bs?.boards.size ?? 0}`],
+        ],
+        savedTab,
+        (v) => {
+          savedTab = v
+          renderSavedSheet()
+        },
+      ),
+    )
+    if (savedTab === 'miei') {
+      const known = [...st.miei].filter(([id]) => trails.has(id))
+      known.sort((x, y) => (y[1].aggiunto?.getTime() ?? 0) - (x[1].aggiunto?.getTime() ?? 0))
+      if (!known.length) parts.push(h('p', { class: 'muted empty-list' }, 'Nessun sentiero salvato: usa "Salva nei miei" nella scheda di un sentiero.'))
+      else parts.push(h('ul', { class: 'cards' }, ...known.map(([id]) => cardFor(trails.get(id)!, { onRemove: () => toggleMine(id) }))))
+    } else if (bs) {
+      parts.push(...boardsList(bs, trailInfo(), a, renderSavedSheet))
     }
-    if (savedTab === 'condivisi') {
-      parts.push(h('p', { class: 'hint' }, `Lista comune dei membri storici: ${[...st.membri.values()].join(', ')}. Diventerà una bacheca con inviti.`))
-    }
-    const entries = savedTab === 'miei' ? [...st.miei] : [...st.condivisi]
-    const known = entries.filter(([id]) => trails.has(id))
-    known.sort((a, b) => (b[1].aggiunto?.getTime() ?? 0) - (a[1].aggiunto?.getTime() ?? 0))
-    if (!known.length) {
-      parts.push(
-        h('p', { class: 'muted empty-list' }, savedTab === 'miei' ? 'Nessun sentiero salvato: usa "Salva nei miei" nella scheda di un sentiero.' : 'La lista condivisa è vuota.'),
-      )
-    } else {
-      const list = h('ul', { class: 'cards' })
-      for (const [id, info] of known) {
-        const da = 'da' in info ? (info as { da: string }).da : null
-        list.append(
-          cardFor(trails.get(id)!, {
-            who: da ? `aggiunto da ${st.membri.get(da) ?? 'un membro'}` : null,
-            onRemove: () => toggleSaved(savedTab, id),
-          }),
-        )
-      }
-      parts.push(list)
-    }
-    if (!st.legacyMember) parts.push(h('p', { class: 'hint' }, 'Le bacheche condivise con gli amici arrivano nel prossimo passo.'))
   }
-  $('saved-body').replaceChildren(...parts)
+  // Non ridisegnare sopra un modulo "nuova bacheca" aperto.
+  const body = $('saved-body')
+  if (body.querySelector('.boardform') && document.activeElement && body.contains(document.activeElement)) return
+  body.replaceChildren(...parts)
+}
+
+/** Vista di una bacheca (colonna su PC, schermata su telefono). */
+function renderBoardView(): void {
+  if ($('board-view').hidden || !currentBoard) return
+  const board = boardsSt?.boards.get(currentBoard)
+  const body = $('board-body')
+  if (!board) {
+    $('board-title').textContent = 'Bacheca'
+    body.replaceChildren(h('p', { class: 'muted' }, acct?.status === 'pronto' ? 'Caricamento… (o non fai più parte di questa bacheca)' : 'Accedi per vedere le bacheche.'))
+    return
+  }
+  // Mentre si scrive (nota, ricerca, nome) gli aggiornamenti non ridisegnano la vista.
+  const active = document.activeElement
+  if (active && body.contains(active) && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && active.value) return
+  $('board-title').textContent = board.nome
+  if (!boardUi.has(board.id)) boardUi.set(board.id, { openNotes: new Set(), lastLink: { url: null } })
+  const ui = boardUi.get(board.id)!
+  const ctx = { board, me: acct?.user?.uid ?? '', info: trailInfo(), a: boardsActions(), rerender: renderBoardView, openNotes: ui.openNotes, lastLink: ui.lastLink }
+  body.replaceChildren(...renderBoard(ctx))
+}
+
+function renderNotifsView(): void {
+  if ($('notifs-view').hidden) return
+  const body = $('notifs-body')
+  if (acct?.status !== 'pronto') {
+    body.replaceChildren(...loginPrompt('Accedi per ricevere le notifiche delle tue bacheche.'))
+    return
+  }
+  body.replaceChildren(
+    ...renderNotifications(boardsSt?.notifiche ?? [], trailInfo(), boardsActions(), (n) => {
+      if (n.tipo === 'invito') openView('saved')
+      else if (boardsSt?.boards.has(n.bacheca)) openBoard(n.bacheca)
+    }),
+  )
+}
+
+/** Campanella: contatore nell'header (PC), sulla voce Profilo e nel profilo (telefono). */
+function renderBells(): void {
+  const unread = (boardsSt?.notifiche.filter((n) => !n.letta).length ?? 0) + (boardsSt?.inviti.length ?? 0)
+  for (const id of ['notif-count', 'tab-notif-count', 'profile-notif-count']) {
+    $(id).hidden = unread === 0
+    $(id).textContent = unread > 99 ? '99+' : String(unread)
+  }
+  $('open-notifs').setAttribute('aria-label', unread ? `Notifiche: ${unread} da leggere` : 'Notifiche')
 }
 
 /** Pagina profilo (schermata su telefono, colonna sinistra su PC). Mentre un modulo è aperto
@@ -1060,9 +1203,18 @@ function renderSavedSheet(): void {
 function renderProfileView(force = false): void {
   if ($('profile-view').hidden) return
   const body = $('profile-body')
-  if (!force && body.querySelector('.card.editing, .identity-form')) return
+  // Non ridisegnare mentre si scrive: un modulo aperto o un campo con il cursore (es. una data
+  // a metà) andrebbero persi.
+  const active = document.activeElement
+  const typing =
+    active instanceof HTMLInputElement &&
+    body.contains(active) &&
+    (active.type !== 'date' || active.validity.badInput || !validDate(active.value))
+  if (!force && (typing || body.querySelector('.card.editing, .identity-form'))) return
   body.replaceChildren(...renderProfilePage(acct, accountActions(), () => renderProfileView(true)))
 }
+
+document.addEventListener('profilo-aggiorna', () => setTimeout(() => renderProfileView(), 0))
 
 /** Avatar nella barra in basso (telefono) e in alto a destra (PC), con pallino se ci sono scadenze. */
 function renderAvatars(): void {
@@ -1072,10 +1224,11 @@ function renderAvatars(): void {
     ['tab-avatar', 26],
     ['header-avatar', 40],
   ] as const) {
-    $(slot).replaceChildren(logged ? avatarEl(acct!.profile!.avatar, acct!.profile!.nome, size) : icon('user', size === 40 ? 22 : 22))
+    $(slot).replaceChildren(logged ? avatarEl(acct!.profile!.avatar, acct!.profile!.nome, size) : icon('user', 22))
   }
   $('tab-alert').hidden = !alerts
   $('header-alert').hidden = !alerts
+  $('open-notifs').hidden = !logged
   const label = logged ? `Profilo di ${acct!.profile!.nome}${alerts ? ' (scadenze in arrivo)' : ''}` : 'Profilo'
   $('open-profile').setAttribute('aria-label', label)
   $('open-profile').title = label
@@ -1084,7 +1237,7 @@ function renderAvatars(): void {
 /** Primo accesso: onboarding finché il profilo non risulta completato o saltato. */
 function renderOnboarding(): void {
   const el = $('onboarding')
-  const need = acct?.status === 'pronto' && acct.profile && !acct.profile.onboarding && !onboardingClosed
+  const need = acct?.status === 'pronto' && acct.profile && !acct.profile.onboarding && !onboardingClosed && !pendingInvite
   el.hidden = !need
   if (!need) return
   const a = accountActions()
@@ -1102,6 +1255,52 @@ function renderOnboarding(): void {
   )
 }
 
-if (stored('salvati-attivo', false)) loadAccount()
+// ---- invito via link: ?invito=<bacheca>~<token>
+
+const inviteParam = new URLSearchParams(location.search).get('invito')
+let pendingInvite: { board: string; token: string } | null = (() => {
+  const [board, token] = (inviteParam ?? '').split('~')
+  return board && token && /^[\w-]{1,40}$/.test(board) && /^[\w-]{20,64}$/.test(token) ? { board, token } : null
+})()
+let inviteStage: 'attesa' | 'mostrato' | 'fatto' = 'attesa'
+
+function clearInviteParam(): void {
+  const u = new URL(location.href)
+  u.searchParams.delete('invito')
+  history.replaceState(null, '', u.toString())
+}
+
+async function handleInviteLink(): Promise<void> {
+  if (!pendingInvite || inviteStage === 'fatto') return
+  const a = boardsActions()
+  const close = () => {
+    inviteStage = 'fatto'
+    pendingInvite = null
+    clearInviteParam()
+    closeModal()
+    renderOnboarding()
+  }
+  if (!acct || acct.status === 'caricamento') return void openModal(renderLinkInvite('caricamento', a, doLogin, () => {}, close))
+  if (acct.status === 'anonimo') return void openModal(renderLinkInvite('login', a, doLogin, () => {}, close))
+  if (acct.status !== 'pronto' || inviteStage === 'mostrato') return
+  inviteStage = 'mostrato'
+  const { board, token } = pendingInvite
+  openModal(renderLinkInvite('caricamento', a, doLogin, () => {}, close))
+  const m = await loadAccount()
+  const preview = await m.previewLink(board, token).catch(() => null)
+  openModal(
+    renderLinkInvite(preview, a, doLogin, async () => {
+      try {
+        if (preview) await m.joinByLink(preview)
+        close()
+        openBoard(board)
+      } catch (e) {
+        showToast(`Non riuscito: ${(e as Error).message}`)
+      }
+    }, close),
+  )
+}
+
+if (pendingInvite || stored('salvati-attivo', false)) loadAccount()
 
 applyDay()

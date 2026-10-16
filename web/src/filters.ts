@@ -225,7 +225,7 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     [
       ['entrambi', 'Tutti'],
       ['miei', 'Miei'],
-      ['condivisi', 'Condivisi'],
+      ['condivisi', 'Bacheche'],
     ],
     f.salvati || 'entrambi',
     (v) => {

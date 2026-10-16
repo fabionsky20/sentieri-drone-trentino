@@ -4,12 +4,9 @@
 //
 // REGOLA FISSA: nessun dato sulla quota a cui l'utente ha volato, né log di volo.
 
-import { initializeApp } from 'firebase/app'
 import {
-  connectAuthEmulator,
   deleteUser,
   GoogleAuthProvider,
-  getAuth,
   onAuthStateChanged,
   reauthenticateWithPopup,
   signInWithPopup,
@@ -18,15 +15,11 @@ import {
 } from 'firebase/auth'
 import {
   collection,
-  connectFirestoreEmulator,
   deleteDoc,
   doc,
   getDoc,
   getDocs,
-  initializeFirestore,
   onSnapshot,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   query,
   serverTimestamp,
   setDoc,
@@ -34,7 +27,6 @@ import {
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore'
-import { firebaseConfig } from './firebase-config'
 
 export type ListName = 'miei' | 'condivisi'
 export type DroneClass = 'C0' | 'C1' | 'C2' | 'legacy'
@@ -45,6 +37,7 @@ export interface Profile {
   avatar: string | null
   onboarding: boolean // true = onboarding completato o saltato
   migrato: boolean
+  cercabile: boolean // nella rubrica pubblica (nome e foto) per gli inviti
   attestato_scadenza: string | null // AAAA-MM-GG
   dflight_scadenza: string | null
 }
@@ -69,20 +62,10 @@ export interface AccountState {
   errore?: string
 }
 
-// Solo per le prove in locale: con "?emulatori" su localhost usa gli emulatori Firebase
-// (progetto demo, nessun contatto con i dati veri). Sul sito pubblicato non si attiva mai.
-const EMULATORS = location.hostname === 'localhost' && new URLSearchParams(location.search).has('emulatori')
+import { purgeBoardsData, startBoards, stopBoards } from './boards'
+import { auth, db } from './fb'
 
-const app = initializeApp(EMULATORS ? { ...firebaseConfig, projectId: 'demo-quota120' } : firebaseConfig)
-const auth = getAuth(app) // sessione salvata nel browser: il login resta finché non si esce
-// Cache locale persistente: dati visibili anche senza rete (utile in montagna).
-const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-})
-if (EMULATORS) {
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
-  connectFirestoreEmulator(db, '127.0.0.1', 8080)
-}
+export * from './boards'
 
 const EMPTY = (): Omit<AccountState, 'status' | 'user'> => ({
   profile: null,
@@ -113,7 +96,12 @@ const fail = (e: unknown) => emit({ status: 'errore', errore: (e as Error)?.mess
 // ---------------------------------------------------------------- avvio sessione
 
 /** Crea il profilo al primo accesso e sposta i vecchi salvati (utenti/{uid}/salvati) nel nuovo posto. */
-async function ensureProfile(user: User): Promise<void> {
+/** Rubrica pubblica: solo nome e foto, per essere trovati e invitati nelle bacheche. */
+async function publishDirectory(uid: string, nome: string, avatar: string | null): Promise<void> {
+  await setDoc(doc(db, 'profili', uid), { nome: nome.slice(0, 60), nomeMin: nome.slice(0, 60).toLowerCase(), avatar, aggiornato: serverTimestamp() })
+}
+
+async function ensureProfile(user: User): Promise<{ nome: string; avatar: string | null; cercabile: boolean }> {
   const ref = doc(db, 'users', user.uid)
   const snap = await getDoc(ref)
   if (!snap.exists()) {
@@ -138,14 +126,19 @@ async function ensureProfile(user: User): Promise<void> {
     await batch.commit()
     // I vecchi documenti restano dove sono (nessuna perdita); si cancellano solo con l'account.
   }
+  const now = (await getDoc(ref)).data()!
+  const info = { nome: String(now.nome), avatar: (now.avatar as string | null) ?? null, cercabile: now.cercabile !== false }
+  if (info.cercabile) await publishDirectory(user.uid, info.nome, info.avatar).catch(() => {})
+  return info
 }
 
 async function start(user: User): Promise<void> {
   unsubs.forEach((u) => u())
   unsubs = []
   emit({ status: 'caricamento', user: { uid: user.uid, nome: user.displayName, email: user.email, foto: user.photoURL }, ...EMPTY() })
+  let info: { nome: string; avatar: string | null; cercabile: boolean }
   try {
-    await ensureProfile(user)
+    info = await ensureProfile(user)
   } catch (e) {
     fail(e)
     return
@@ -165,6 +158,7 @@ async function start(user: User): Promise<void> {
             avatar: d.avatar ?? null,
             onboarding: !!d.onboarding,
             migrato: !!d.migrato,
+            cercabile: d.cercabile !== false,
             attestato_scadenza: d.attestato_scadenza ?? null,
             dflight_scadenza: d.dflight_scadenza ?? null,
           },
@@ -209,14 +203,16 @@ async function start(user: User): Promise<void> {
       )
     }
   } catch {
-    // non membro storico: nessuna lista condivisa (arriverà con le bacheche)
+    // non membro storico: nessuna lista condivisa storica
   }
+  await startBoards({ uid, nome: info.nome, avatar: info.avatar }, state.legacyMember).catch(() => {})
 }
 
 onAuthStateChanged(auth, (user) => {
   if (!user) {
     unsubs.forEach((u) => u())
     unsubs = []
+    stopBoards()
     emit({ status: 'anonimo', user: null, ...EMPTY() })
     return
   }
@@ -251,6 +247,20 @@ export type ProfilePatch = Partial<Pick<Profile, 'nome' | 'zona' | 'onboarding' 
 
 export async function updateProfile(patch: ProfilePatch): Promise<void> {
   await setDoc(doc(db, 'users', uid()), { ...patch, aggiornato: serverTimestamp() }, { merge: true })
+  // Il nome compare anche nella rubrica pubblica e nelle nuove azioni sulle bacheche.
+  if (patch.nome && state.profile) {
+    if (state.profile.cercabile) await publishDirectory(uid(), patch.nome, state.profile.avatar)
+    const u = auth.currentUser
+    if (u) await startBoards({ uid: u.uid, nome: patch.nome, avatar: state.profile.avatar }, state.legacyMember)
+  }
+}
+
+/** Visibile o no nella ricerca per nome (per ricevere inviti diretti). */
+export async function setSearchable(on: boolean): Promise<void> {
+  const u = uid()
+  await setDoc(doc(db, 'users', u), { cercabile: on, aggiornato: serverTimestamp() }, { merge: true })
+  if (on && state.profile) await publishDirectory(u, state.profile.nome, state.profile.avatar)
+  else await deleteDoc(doc(db, 'profili', u))
 }
 
 // ---------------------------------------------------------------- hangar
@@ -293,6 +303,8 @@ export async function deleteAccount(): Promise<void> {
   const user = auth.currentUser
   if (!user) throw new Error('Serve il login')
   const u = user.uid
+  // Prima le bacheche (esce da tutte, elimina le proprie), poi i dati personali.
+  await purgeBoardsData()
   unsubs.forEach((x) => x())
   unsubs = []
 
@@ -312,6 +324,7 @@ export async function deleteAccount(): Promise<void> {
   }
   // L'iscrizione ai membri va tolta per ultima: serviva per cancellare i contributi condivisi.
   if (state.legacyMember) await deleteDoc(doc(db, 'membri', u))
+  await deleteDoc(doc(db, 'profili', u))
   await deleteDoc(doc(db, 'users', u))
 
   try {

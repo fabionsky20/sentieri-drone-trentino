@@ -29,7 +29,7 @@ Le regole di sicurezza di Firestore rifiutano qualunque campo non previsto, quin
 | Passo | Contenuto | Stato |
 |---|---|---|
 | **A** | Login aperto con Google, profilo creato in automatico, onboarding (nome, zona, droni), **hangar** droni (classe C0/C1/C2/legacy, peso, assicurazione), documenti del pilota con scadenza (attestato A1/A3, abbonamento D-Flight), avvisi a 30 giorni, eliminazione account | ✅ |
-| **B** | **Bacheche condivise con inviti**: la vecchia lista "Condivisi" diventa la prima bacheca | da fare |
+| **B** | **Bacheche condivise con inviti**: la vecchia lista "Condivisi" diventa la prima bacheca. Ruoli (proprietario / può modificare / può solo vedere), data prevista, "ci sto", note, inviti via link (scadenza, revoca) e per nome, notifiche in-app | ✅ |
 | **C** | **Note sui sentieri**, "**segna come fatto**", **statistiche** (private di default) | da fare |
 | **D** | **Meteo** (Open-Meteo) e **indice di volabilità del giorno** | da fare |
 
