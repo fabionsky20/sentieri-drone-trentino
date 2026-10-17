@@ -40,6 +40,17 @@ export interface Profile {
   cercabile: boolean // nella rubrica pubblica (nome e foto) per gli inviti
   attestato_scadenza: string | null // AAAA-MM-GG
   dflight_scadenza: string | null
+  invito_codice: string | null // codice del proprio link "Invita amici"
+  invitato_da: string | null // uid di chi ha invitato (fissato alla creazione del profilo)
+  invitato_da_nome: string | null
+}
+
+/** Amico entrato nell'app con il mio link di invito. */
+export interface Friend {
+  uid: string
+  nome: string
+  avatar: string | null
+  entrato: Date | null
 }
 
 export interface Drone {
@@ -59,6 +70,7 @@ export interface AccountState {
   condivisi: Map<string, { aggiunto: Date | null; da: string }>
   membri: Map<string, string> // uid → nome (solo membri storici)
   legacyMember: boolean // può vedere la lista condivisa storica
+  amici: Friend[] // entrati con il mio link, dal più recente
   errore?: string
 }
 
@@ -74,6 +86,7 @@ const EMPTY = (): Omit<AccountState, 'status' | 'user'> => ({
   condivisi: new Map(),
   membri: new Map(),
   legacyMember: false,
+  amici: [],
 })
 let state: AccountState = { status: 'caricamento', user: null, ...EMPTY() }
 const listeners = new Set<(s: AccountState) => void>()
@@ -101,21 +114,64 @@ async function publishDirectory(uid: string, nome: string, avatar: string | null
   await setDoc(doc(db, 'profili', uid), { nome: nome.slice(0, 60), nomeMin: nome.slice(0, 60).toLowerCase(), avatar, aggiornato: serverTimestamp() })
 }
 
+// ---- invito all'app: ?amico=<codice>. Il codice resta nel browser finché non si fa login
+// (anche in una visita successiva); conta solo se il profilo viene creato in quel momento.
+const REFERRAL_KEY = 'invito-app'
+const REFERRAL_DAYS = 30
+export const validCode = (c: string | null): c is string => !!c && /^[\w-]{12,40}$/.test(c)
+
+export function setReferral(code: string): void {
+  try {
+    localStorage.setItem(REFERRAL_KEY, JSON.stringify({ code, t: Date.now() }))
+  } catch {
+    // archiviazione non disponibile: l'invito vale solo se si accede subito
+    pendingReferral = code
+  }
+}
+let pendingReferral: string | null = null
+function takeReferral(): string | null {
+  let code = pendingReferral
+  try {
+    const v = JSON.parse(localStorage.getItem(REFERRAL_KEY) ?? 'null') as { code: string; t: number } | null
+    if (v && Date.now() - v.t < REFERRAL_DAYS * 86_400_000) code = v.code
+    localStorage.removeItem(REFERRAL_KEY)
+  } catch {
+    // niente
+  }
+  pendingReferral = null
+  return validCode(code) ? code : null
+}
+
+/** Chi invita (nome) dal codice del link: leggibile anche senza login. */
+export async function previewReferral(code: string): Promise<{ uid: string; nome: string } | null> {
+  const s = await getDoc(doc(db, 'codiciInvito', code)).catch(() => null)
+  return s?.exists() ? { uid: String(s.get('uid')), nome: String(s.get('nome')) } : null
+}
+
 async function ensureProfile(user: User): Promise<{ nome: string; avatar: string | null; cercabile: boolean }> {
   const ref = doc(db, 'users', user.uid)
   const snap = await getDoc(ref)
+  const code = takeReferral()
   if (!snap.exists()) {
-    await setDoc(ref, {
-      nome: (user.displayName ?? user.email?.split('@')[0] ?? 'Pilota').slice(0, 60),
+    const nome = (user.displayName ?? user.email?.split('@')[0] ?? 'Pilota').slice(0, 60)
+    const avatar = user.photoURL?.slice(0, 600) ?? null
+    const from = code ? await previewReferral(code) : null
+    const b = writeBatch(db)
+    b.set(ref, {
+      nome,
       zona: null,
-      avatar: user.photoURL?.slice(0, 600) ?? null,
+      avatar,
       onboarding: false,
       migrato: false,
       attestato_scadenza: null,
       dflight_scadenza: null,
+      ...(from && from.uid !== user.uid ? { invitato_da: from.uid, invitato_da_nome: from.nome.slice(0, 60) } : {}),
       creato: serverTimestamp(),
       aggiornato: serverTimestamp(),
     })
+    // Chi mi ha invitato vede che sono entrato con il suo link.
+    if (from && from.uid !== user.uid) b.set(doc(db, 'users', from.uid, 'amici', user.uid), { nome, avatar, codice: code, entrato: serverTimestamp() })
+    await b.commit()
   }
   const migrato = snap.exists() && snap.get('migrato') === true
   if (!migrato) {
@@ -161,6 +217,9 @@ async function start(user: User): Promise<void> {
             cercabile: d.cercabile !== false,
             attestato_scadenza: d.attestato_scadenza ?? null,
             dflight_scadenza: d.dflight_scadenza ?? null,
+            invito_codice: d.invito_codice ?? null,
+            invitato_da: d.invitato_da ?? null,
+            invitato_da_nome: d.invitato_da_nome ?? null,
           },
         })
       },
@@ -186,6 +245,16 @@ async function start(user: User): Promise<void> {
             .sort((a, b) => a.modello.localeCompare(b.modello, 'it')),
         }),
       fail,
+    ),
+    onSnapshot(
+      collection(db, 'users', uid, 'amici'),
+      (s) =>
+        emit({
+          amici: s.docs
+            .map((d) => ({ uid: d.id, nome: String(d.get('nome')), avatar: d.get('avatar') ?? null, entrato: toDate(d.get('entrato')) }))
+            .sort((a, b) => (b.entrato?.getTime() ?? 0) - (a.entrato?.getTime() ?? 0)),
+        }),
+      () => {},
     ),
   )
   // Lista condivisa storica: solo per chi è nella raccolta "membri".
@@ -250,6 +319,8 @@ export async function updateProfile(patch: ProfilePatch): Promise<void> {
   // Il nome compare anche nella rubrica pubblica e nelle nuove azioni sulle bacheche.
   if (patch.nome && state.profile) {
     if (state.profile.cercabile) await publishDirectory(uid(), patch.nome, state.profile.avatar)
+    const c = state.profile.invito_codice
+    if (c) await setDoc(doc(db, 'codiciInvito', c), { nome: patch.nome.slice(0, 60) }, { merge: true }).catch(() => {})
     const u = auth.currentUser
     if (u) await startBoards({ uid: u.uid, nome: patch.nome, avatar: state.profile.avatar }, state.legacyMember)
   }
@@ -261,6 +332,30 @@ export async function setSearchable(on: boolean): Promise<void> {
   await setDoc(doc(db, 'users', u), { cercabile: on, aggiornato: serverTimestamp() }, { merge: true })
   if (on && state.profile) await publishDirectory(u, state.profile.nome, state.profile.avatar)
   else await deleteDoc(doc(db, 'profili', u))
+}
+
+// ---------------------------------------------------------------- invita amici
+
+function randomCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12))
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/** Link personale all'app (?amico=<codice>): il codice si crea al primo uso e poi resta lo stesso. */
+export async function myInviteLink(): Promise<string> {
+  const u = uid()
+  let code = state.profile?.invito_codice ?? null
+  if (!code || !(await previewReferral(code))) {
+    code = randomCode()
+    const b = writeBatch(db)
+    b.set(doc(db, 'codiciInvito', code), { uid: u, nome: (state.profile?.nome ?? 'Pilota').slice(0, 60), creato: serverTimestamp() })
+    b.set(doc(db, 'users', u), { invito_codice: code, aggiornato: serverTimestamp() }, { merge: true })
+    await b.commit()
+  }
+  const url = new URL(location.href)
+  url.search = `?amico=${code}`
+  url.hash = ''
+  return url.toString()
 }
 
 // ---------------------------------------------------------------- hangar
@@ -312,7 +407,11 @@ export async function deleteAccount(): Promise<void> {
     ...(await getDocs(collection(db, 'users', u, 'saved'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'users', u, 'droni'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'utenti', u, 'salvati'))).docs.map((d) => d.ref),
+    ...(await getDocs(collection(db, 'users', u, 'amici'))).docs.map((d) => d.ref),
   ]
+  // Il mio codice di invito e la mia voce tra gli amici di chi mi ha invitato.
+  if (state.profile?.invito_codice) refs.push(doc(db, 'codiciInvito', state.profile.invito_codice))
+  if (state.profile?.invitato_da) refs.push(doc(db, 'users', state.profile.invitato_da, 'amici', u))
   if (state.legacyMember) {
     refs.push(...(await getDocs(query(collection(db, 'condivisi'), where('da', '==', u)))).docs.map((d) => d.ref))
   }

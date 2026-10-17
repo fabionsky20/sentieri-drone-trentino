@@ -12,11 +12,13 @@
 
 | Percorso | Contenuto | Chi lo vede |
 |---|---|---|
-| `users/{uid}` | `nome`, `zona`, `avatar` (foto Google), `onboarding`, `migrato`, `attestato_scadenza`, `dflight_scadenza` (AAAA-MM-GG), `creato`, `aggiornato` | solo l'utente |
+| `users/{uid}` | `nome`, `zona`, `avatar` (foto Google), `onboarding`, `migrato`, `attestato_scadenza`, `dflight_scadenza` (AAAA-MM-GG), `cercabile`, `invito_codice` (il proprio link), `invitato_da` / `invitato_da_nome` (fissati alla creazione), `creato`, `aggiornato` | solo l'utente |
 | `users/{uid}/saved/{sentiero}` | sentieri salvati ("I miei"), `aggiunto` | solo l'utente |
 | `users/{uid}/droni/{id}` | `modello`, `classe` (C0/C1/C2/legacy), `peso_g`, `assicurazione_scadenza` | solo l'utente |
 | `users/{uid}/bacheche/{b}` | indice delle bacheche dell'utente | solo l'utente |
 | `users/{uid}/notifiche/{n}` | notifiche in-app (inviti, ingressi, sentieri, ci sto, note), `letta` | solo l'utente (gli altri possono solo crearle, legate a una bacheca comune) |
+| `users/{uid}/amici/{uid}` | amici entrati con il mio link: `nome`, `avatar`, `entrato` | solo l'utente (li scrive l'invitato mentre crea il profilo, solo con il codice giusto) |
+| `codiciInvito/{codice}` | link "Invita amici": `uid` e `nome` di chi invita | chiunque abbia il codice (anche senza login), nessun elenco |
 | `profili/{uid}` | rubrica per la ricerca per nome: `nome`, `avatar` | utenti con login; si toglie con "Visibile nella ricerca" nel profilo |
 | `boards/{b}` | bacheca: `nome`, `copertina` (colore o sentiero), `owner` | solo i membri |
 | `boards/{b}/partecipanti/{uid}` | `ruolo` (owner / editor / viewer), `nome`, `avatar`, `via` | solo i membri |
@@ -38,6 +40,12 @@ Al primo accesso dopo l'aggiornamento, l'app copia `utenti/{uid}/salvati/*` in `
 
 Dal passo B è in sola lettura. Nei Salvati i membri storici vedono il pulsante **TRASFORMA IN BACHECA** finché la bacheca non esiste: chi lo preme per primo ne diventa **proprietario**, tutti i sentieri passano nella bacheca e gli altri membri storici vi entrano in automatico come "può modificare".
 
+## Invita amici
+
+- Nel profilo, **INVITA AMICI** crea (una volta) un codice casuale e il link personale `…/?amico=<codice>`. Sul telefono apre la condivisione nativa, su PC copia negli appunti.
+- Facoltativo: "Anche nella bacheca «…»" aggiunge al link un invito alla bacheca (può modificare, 30 giorni).
+- Chi apre il link vede "Fabio ti ha invitato su Quota 120". Il codice resta nel browser per 30 giorni: se il profilo viene **creato** in quel momento, registra chi ha invitato e compare tra i suoi amici. Chi era già registrato non cambia nulla.
+
 ## Bacheche e inviti (senza Cloud Functions)
 
 - Chiunque abbia fatto login crea bacheche. Ruoli: **proprietario**, **può modificare** (aggiunge/toglie sentieri, data, note, ci sto), **può solo vedere**.
@@ -53,11 +61,11 @@ Il file [`firestore.rules`](../firestore.rules) è la copia di riferimento. **Va
 2. Seleziona tutto il testo e sostituiscilo con il contenuto di `firestore.rules` (su GitHub: apri il file → pulsante *Copy raw file*).
 3. **Pubblica**. Ha effetto entro un minuto.
 
-Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 sulle bacheche: chi non è membro non legge nulla, chi può solo vedere non scrive, link scaduti o revocati falliscono, nessuno entra senza invito valido, date fino a +10 anni).
+Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 sulle bacheche + 27 sugli inviti all'app: chi non è membro non legge nulla, chi può solo vedere non scrive, link scaduti o revocati falliscono, nessuno entra senza invito valido, date fino a +10 anni).
 
 ## Eliminazione account
 
-"Elimina account" nel profilo cancella: le bacheche di cui è proprietario (con tutto il contenuto), la sua partecipazione alle altre, inviti e notifiche, la voce nella rubrica, profilo, droni, salvati, vecchi salvati, la sua iscrizione ai membri storici, e infine l'account di accesso. Google può chiedere di confermare l'accesso con un popup.
+"Elimina account" nel profilo cancella: le bacheche di cui è proprietario (con tutto il contenuto), la sua partecipazione alle altre, inviti e notifiche, la voce nella rubrica, il codice di invito, l'elenco degli amici invitati e la propria voce in quello di chi l'ha invitato, profilo, droni, salvati, vecchi salvati, la sua iscrizione ai membri storici, e infine l'account di accesso. Google può chiedere di confermare l'accesso con un popup.
 
 ## Prove in locale con gli emulatori
 

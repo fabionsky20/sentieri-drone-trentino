@@ -2784,3 +2784,14 @@ button:disabled {
     --rw: clamp(280px, var(--right-w, 380px), 50vw);
   }
 }
+
+/* ---- profilo: amici ---- */
+
+.friends > .section-label:not(:first-child) {
+  margin-top: 18px;
+}
+
+.friends > .btn-primary + .field {
+  margin-top: 10px;
+}
+

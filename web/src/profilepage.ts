@@ -21,6 +21,11 @@ export interface ProfileActions {
   removeDrone: (id: string) => Promise<void>
   deleteAccount: () => Promise<void>
   zoneSuggestions: string[]
+  /** Link personale all'app, con l'invito a una mia bacheca se scelta. */
+  inviteLink: (boardId: string | null) => Promise<string>
+  /** Bacheche di cui sono proprietario (per l'invito diretto nel link). */
+  ownedBoards: () => { id: string; nome: string }[]
+  toast: (msg: string) => void
 }
 
 // ---------------------------------------------------------------- scadenze
@@ -333,6 +338,98 @@ function identity(st: AccountState, a: ProfileActions, rerender: () => void): HT
   return box
 }
 
+// ---------------------------------------------------------------- invita amici
+
+let lastInvite: { url: string; board: string | null } | null = null
+let inviteBoard: string | null = null
+
+/** Telefono: condivisione nativa; PC: copia negli appunti. */
+async function shareInvite(url: string, nome: string, a: ProfileActions): Promise<void> {
+  const text = `${nome} ti invita su Quota 120: sentieri del Trentino e dove si può volare con il drone.`
+  if ('share' in navigator && matchMedia('(pointer: coarse)').matches) {
+    try {
+      await navigator.share({ title: 'Quota 120', text, url })
+      return
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') return
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    a.toast('Link di invito copiato negli appunti.')
+  } catch {
+    a.toast('Copia il link dal riquadro qui sotto.')
+  }
+}
+
+function friendsSection(st: AccountState, a: ProfileActions, rerender: () => void): HTMLElement {
+  const p = st.profile!
+  const err = h('p', { class: 'warn small' })
+  const boards = a.ownedBoards()
+  if (inviteBoard && !boards.some((b) => b.id === inviteBoard)) inviteBoard = null
+  const btn = h('button', { type: 'button', class: 'btn-primary wide' }, icon('share', 18), 'INVITA AMICI') as HTMLButtonElement
+  btn.addEventListener('click', () =>
+    busy(
+      btn,
+      async () => {
+        // Il link si riusa finché non si cambia bacheca (ogni invito a bacheca crea un nuovo link).
+        const url = lastInvite && lastInvite.board === inviteBoard ? lastInvite.url : await a.inviteLink(inviteBoard)
+        lastInvite = { url, board: inviteBoard }
+        await shareInvite(url, p.nome, a)
+        rerender()
+      },
+      err,
+    ),
+  )
+  const parts: (HTMLElement | null)[] = [h('p', { class: 'section-label' }, 'Amici'), btn]
+  if (boards.length) {
+    const sel = h('select', { 'aria-label': 'Invita anche in una bacheca' }, h('option', { value: '' }, 'Solo nell’app'), ...boards.map((b) => h('option', { value: b.id }, `Anche nella bacheca «${b.nome}»`))) as HTMLSelectElement
+    sel.value = inviteBoard ?? ''
+    sel.addEventListener('change', () => (inviteBoard = sel.value || null))
+    parts.push(field('Invito', sel, 'Con una bacheca, chi entra riceve anche l’invito a farne parte (può modificare, valido 30 giorni).'))
+  }
+  if (lastInvite) {
+    const input = h('input', { type: 'text', readonly: '', value: lastInvite.url, 'aria-label': 'Link di invito' }) as HTMLInputElement
+    input.addEventListener('focus', () => input.select())
+    parts.push(h('div', { class: 'linkout' }, input))
+  }
+  parts.push(err, h('p', { class: 'hint' }, 'Chi apre il tuo link vede che l’hai invitato tu; quando accede compare qui sotto.'))
+  parts.push(h('p', { class: 'section-label' }, `Entrati con il tuo link · ${st.amici.length}`))
+  parts.push(
+    st.amici.length
+      ? h('ul', { class: 'people' }, ...st.amici.map((f) => h('li', {}, avatarEl(f.avatar, f.nome, 28), h('span', { class: 'member-name' }, f.nome), h('span', { class: 'mono small muted' }, f.entrato ? f.entrato.toLocaleDateString('it-IT').replace(/\//g, '.') : ''))))
+      : h('p', { class: 'muted small' }, 'Ancora nessuno.'),
+  )
+  if (p.invitato_da_nome) parts.push(h('p', { class: 'hint' }, `Sei entrato con l’invito di ${p.invitato_da_nome}.`))
+  return h('section', { class: 'friends' }, ...parts.filter((x): x is HTMLElement => !!x))
+}
+
+// ---------------------------------------------------------------- invito ricevuto (pagina di arrivo)
+
+/** "Fabio ti ha invitato su Quota 120": prima del login. */
+export function renderWelcomeInvite(from: { nome: string } | null | 'caricamento', withBoard: boolean, login: () => void, close: () => void): HTMLElement {
+  const card = h('div', { class: 'ob-card', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'welcome-title' })
+  const x = h('button', { type: 'button', class: 'iconbtn', 'aria-label': 'Chiudi' }, icon('close'))
+  x.addEventListener('click', close)
+  card.append(h('div', { class: 'ob-head' }, h('p', { class: 'section-label' }, 'Invito'), x))
+  if (from === 'caricamento') {
+    card.append(h('p', { class: 'muted' }, 'Controllo l’invito…'))
+    return card
+  }
+  const go = h('button', { type: 'button', class: 'btn-primary wide' }, 'ACCEDI CON GOOGLE')
+  go.addEventListener('click', login)
+  const later = h('button', { type: 'button', class: 'btn-text' }, 'PIÙ TARDI')
+  later.addEventListener('click', close)
+  card.append(
+    h('h2', { class: 'title', id: 'welcome-title' }, from ? `${from.nome} ti ha invitato su Quota 120` : 'Benvenuto su Quota 120'),
+    h('p', {}, 'Sentieri SAT del Trentino con le zone D-Flight: vedi dove e fino a che quota puoi volare con il drone, salva i sentieri e organizzati con gli amici.'),
+    ...(withBoard ? [h('p', { class: 'muted' }, 'Dopo l’accesso troverai anche l’invito alla sua bacheca.')] : []),
+    h('p', { class: 'small muted' }, 'Mappa e filtri funzionano anche senza accesso.'),
+    h('div', { class: 'ob-foot' }, later, go),
+  )
+  return card
+}
+
 function dangerZone(a: ProfileActions): HTMLElement {
   const out = h('button', { type: 'button', class: 'btn-outline wide' }, icon('logout', 18), 'ESCI')
   out.addEventListener('click', a.logout)
@@ -381,6 +478,7 @@ export function renderProfilePage(st: AccountState | null, a: ProfileActions, re
     expiryBox(expiries(p, st.droni)),
     hangar(st, a, rerender),
     documents(p, a),
+    friendsSection(st, a, rerender),
     h(
       'section',
       {},

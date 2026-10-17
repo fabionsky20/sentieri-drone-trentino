@@ -7,8 +7,10 @@
 //   ├ saved/{trail}                 sentieri salvati ("I miei")
 //   ├ droni/{id}                    hangar
 //   ├ bacheche/{board}              indice delle bacheche dell'utente (lo scrive solo lui)
-//   └ notifiche/{id}                notifiche in app: le scrivono gli altri membri, le legge solo lui
+//   ├ notifiche/{id}                notifiche in app: le scrivono gli altri membri, le legge solo lui
+//   └ amici/{uid}                   amici entrati con il mio link (li scrive l'invitato, li leggo io)
 // - profili/{uid}                   rubrica pubblica (solo nome e foto) per la ricerca degli amici
+// - codiciInvito/{codice}           link "Invita amici": chi invita (uid e nome), leggibile col codice
 // - boards/{board}                  bacheca: nome, copertina, proprietario
 //   ├ partecipanti/{uid}            ruolo: owner | editor (può modificare) | viewer (può solo vedere)
 //   ├ sentieri/{trail}              aggiunto da, quando, data prevista, "ci sto" dei membri
@@ -115,7 +117,8 @@ service cloud.firestore {
     function validProfile(d) {
       return d.keys().hasAll(['nome', 'onboarding', 'migrato', 'creato', 'aggiornato'])
         && d.keys().hasOnly(['nome', 'zona', 'avatar', 'onboarding', 'migrato', 'cercabile',
-                             'attestato_scadenza', 'dflight_scadenza', 'creato', 'aggiornato'])
+                             'attestato_scadenza', 'dflight_scadenza', 'invito_codice',
+                             'invitato_da', 'invitato_da_nome', 'creato', 'aggiornato'])
         && str(d.nome, 1, 60)
         && optStr(d.get('zona', null), 80)
         && optStr(d.get('avatar', null), 600)
@@ -124,6 +127,9 @@ service cloud.firestore {
         && d.get('cercabile', true) is bool
         && optDate(d.get('attestato_scadenza', null))
         && optDate(d.get('dflight_scadenza', null))
+        && optStr(d.get('invito_codice', null), 40)
+        && optStr(d.get('invitato_da', null), 128)
+        && optStr(d.get('invitato_da_nome', null), 60)
         && d.aggiornato == request.time;
     }
 
@@ -134,7 +140,9 @@ service cloud.firestore {
         && request.resource.data.creato == request.time;
       allow update: if isOwner(uid)
         && validProfile(request.resource.data)
-        && request.resource.data.creato == resource.data.creato;
+        && request.resource.data.creato == resource.data.creato
+        // chi mi ha invitato si fissa alla creazione del profilo
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['invitato_da', 'invitato_da_nome']);
 
       match /saved/{trail} {
         allow read, delete: if isOwner(uid);
@@ -180,6 +188,44 @@ service cloud.firestore {
           && validNotif(request.resource.data)
           && notifRelated(uid, request.resource.data);
       }
+
+      // Amici entrati con il mio link. Li crea l'invitato, una volta sola, mentre crea il proprio
+      // profilo, e solo conoscendo il mio codice. Li leggo io; ognuno può togliere la propria voce.
+      match /amici/{f} {
+        allow read: if isOwner(uid);
+        allow delete: if isOwner(uid) || isOwner(f);
+        allow create: if isOwner(f)
+          && f != uid
+          && request.resource.data.keys().hasOnly(['nome', 'avatar', 'codice', 'entrato'])
+          && request.resource.data.keys().hasAll(['nome', 'codice', 'entrato'])
+          && str(request.resource.data.nome, 1, 60)
+          && optStr(request.resource.data.get('avatar', null), 600)
+          && str(request.resource.data.codice, 12, 40)
+          && get(/databases/$(database)/documents/codiciInvito/$(request.resource.data.codice)).data.uid == uid
+          && !exists(/databases/$(database)/documents/users/$(f))
+          && getAfter(/databases/$(database)/documents/users/$(f)).data.get('invitato_da', null) == uid
+          && request.resource.data.entrato == request.time;
+      }
+    }
+
+    // ---------------------------------------------------------------- invita amici
+
+    // Il codice è lungo e casuale: chi ha il link legge solo nome e uid di chi invita
+    // (anche senza login, per mostrare "Fabio ti ha invitato"). Nessun elenco.
+    match /codiciInvito/{code} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if signedIn()
+        && code.size() >= 12 && code.size() <= 40
+        && request.resource.data.keys().hasOnly(['uid', 'nome', 'creato'])
+        && request.resource.data.uid == request.auth.uid
+        && str(request.resource.data.nome, 1, 60)
+        && request.resource.data.creato == request.time;
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome'])
+        && str(request.resource.data.nome, 1, 60);
+      allow delete: if signedIn() && (resource == null || resource.data.uid == request.auth.uid);
     }
 
     function validNotif(d) {

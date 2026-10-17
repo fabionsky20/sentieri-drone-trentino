@@ -51,6 +51,7 @@ Le regole di sicurezza di Firestore rifiutano qualunque campo non previsto, quin
 - Passaporto e badge.
 - Card dell'uscita per Instagram.
 - Lista inquadrature.
+- **Pannello admin** con accesso riservato: gestione utenti, bacheche e segnalazioni, aggiornamento dei dati D-Flight direttamente dall'app (oggi si fa con la pipeline e un push).
 
 ## Già fatto (prima della roadmap)
 

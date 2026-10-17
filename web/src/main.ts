@@ -16,7 +16,7 @@ import { renderProfile } from './profile'
 import type { AccountState } from './account'
 import type { BoardsState } from './boards'
 import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, type BoardsActions, type TrailInfo } from './boardsui'
-import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, validDate, type ProfileActions } from './profilepage'
+import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, renderWelcomeInvite, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt } from './trailgeom'
 import type {
@@ -1063,6 +1063,7 @@ function loadAccount(): Promise<typeof import('./account')> {
           renderOnboarding()
           applyFilters()
           handleInviteLink()
+          void handleReferral()
         })
         m.subscribeBoards((bs) => {
           boardsSt = bs
@@ -1121,6 +1122,18 @@ const accountActions = (): ProfileActions => ({
     await (await loadAccount()).deleteAccount()
     showToast('Account eliminato. Tutti i tuoi dati sono stati cancellati.')
   },
+  inviteLink: async (boardId) => {
+    const m = await loadAccount()
+    const url = new URL(await m.myInviteLink())
+    if (boardId) {
+      // Invito diretto a una bacheca nello stesso link (stesso sistema dei link di bacheca).
+      const inv = new URL(await m.createLink(boardId, 'editor', 30)).searchParams.get('invito')
+      if (inv) url.searchParams.set('invito', inv)
+    }
+    return url.toString()
+  },
+  ownedBoards: () => [...(boardsSt?.boards.values() ?? [])].filter((b) => b.ruolo === 'owner').map((b) => ({ id: b.id, nome: b.nome })),
+  toast: showToast,
   zoneSuggestions: [...gruppi, ...valleysFC.features.filter((f) => f.properties.principale).map((f) => f.properties.nome)].sort((a, b) =>
     a.localeCompare(b, 'it'),
   ),
@@ -1372,7 +1385,7 @@ function renderAvatars(): void {
 /** Primo accesso: onboarding finché il profilo non risulta completato o saltato. */
 function renderOnboarding(): void {
   const el = $('onboarding')
-  const need = acct?.status === 'pronto' && acct.profile && !acct.profile.onboarding && !onboardingClosed && !pendingInvite
+  const need = acct?.status === 'pronto' && acct.profile && !acct.profile.onboarding && !onboardingClosed && !pendingInvite && !referralPending()
   el.hidden = !need
   if (!need) return
   const a = accountActions()
@@ -1399,14 +1412,16 @@ let pendingInvite: { board: string; token: string } | null = (() => {
 })()
 let inviteStage: 'attesa' | 'mostrato' | 'fatto' = 'attesa'
 
-function clearInviteParam(): void {
+function clearParam(name: string): void {
   const u = new URL(location.href)
-  u.searchParams.delete('invito')
+  u.searchParams.delete(name)
   history.replaceState(null, '', u.toString())
 }
+const clearInviteParam = () => clearParam('invito')
 
 async function handleInviteLink(): Promise<void> {
   if (!pendingInvite || inviteStage === 'fatto') return
+  if (referralPending()) return // prima il benvenuto dell'invito all'app
   const a = boardsActions()
   const close = () => {
     inviteStage = 'fatto'
@@ -1436,6 +1451,44 @@ async function handleInviteLink(): Promise<void> {
   )
 }
 
-if (pendingInvite || stored('salvati-attivo', false)) loadAccount()
+// ---- invito all'app: ?amico=<codice> ("Fabio ti ha invitato su Quota 120")
+
+const amicoParam = new URLSearchParams(location.search).get('amico')
+let referral: string | null = amicoParam && /^[\w-]{12,40}$/.test(amicoParam) ? amicoParam : null
+let referralStage: 'attesa' | 'mostrato' | 'fatto' = 'attesa'
+const referralPending = () => !!referral && referralStage !== 'fatto'
+
+async function handleReferral(): Promise<void> {
+  if (!referralPending() || !acct || acct.status === 'caricamento') return
+  const code = referral!
+  const finish = () => {
+    referralStage = 'fatto'
+    referral = null
+    clearParam('amico')
+    renderOnboarding()
+    void handleInviteLink()
+  }
+  if (acct.status !== 'anonimo') {
+    // Già dentro, o appena entrato: chi ha invitato è stato registrato alla creazione del profilo.
+    const welcomed = referralStage === 'mostrato'
+    if (welcomed) closeModal()
+    if (welcomed && acct.profile?.invitato_da_nome) showToast(`Benvenuto! Sei entrato con l’invito di ${acct.profile.invitato_da_nome}.`)
+    finish()
+    return
+  }
+  if (referralStage === 'mostrato') return
+  referralStage = 'mostrato'
+  const m = await loadAccount()
+  m.setReferral(code) // vale anche se si accede più tardi
+  const close = () => {
+    closeModal()
+    finish()
+  }
+  openModal(renderWelcomeInvite('caricamento', !!pendingInvite, doLogin, close))
+  const from = await m.previewReferral(code).catch(() => null)
+  if (referralStage === 'mostrato' && acct?.status === 'anonimo') openModal(renderWelcomeInvite(from, !!pendingInvite, doLogin, close))
+}
+
+if (pendingInvite || referral || stored('salvati-attivo', false)) loadAccount()
 
 applyDay()
