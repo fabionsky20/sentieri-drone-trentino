@@ -4,7 +4,7 @@
 // Nessun dato salvato: alla fine la mappa torna com'era, nello stesso punto.
 // REGOLA FISSA: l'altezza scelta qui è solo per l'anteprima, non viene registrata.
 
-import type { Map as MlMap } from 'maplibre-gl'
+import type { LngLat, Map as MlMap } from 'maplibre-gl'
 import { h } from './panel'
 import { hhmm, sunPosition, sunTimes } from './sun'
 import { icon } from './ui'
@@ -42,6 +42,24 @@ function bearingTo(a: [number, number], b: [number, number]): number {
   const x = Math.cos(a[1] * r) * Math.sin(b[1] * r) - Math.sin(a[1] * r) * Math.cos(b[1] * r) * Math.cos((b[0] - a[0]) * r)
   return (Math.atan2(y, x) / r + 360) % 360
 }
+/** Punto a `dist` metri da `a` in direzione `brg` (gradi da nord). */
+function destination(a: [number, number], brg: number, dist: number): [number, number] {
+  const r = Math.PI / 180
+  const d = dist / R
+  const lat1 = a[1] * r
+  const lon1 = a[0] * r
+  const th = brg * r
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(th))
+  const lon2 = lon1 + Math.atan2(Math.sin(th) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2))
+  return [lon2 / r, lat2 / r]
+}
+
+/** Distanza (m) del punto guardato lungo la linea di vista: tiene il centro della vista vicino e
+ *  alla quota giusta. Con il centro lontano (a livello del mare) MapLibre allontana il piano di
+ *  ritaglio vicino fino a centinaia di metri: il rilievo vicino veniva tagliato (pareti striate)
+ *  e la camera sollevata di continuo (salti). */
+const LOOK_M = 400
+
 const it = (n: number, d = 0) => n.toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d })
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
 
@@ -60,6 +78,54 @@ const SPEEDS: [string, number][] = [
 
 let active: (() => void) | null = null
 
+// ---------------------------------------------------------------- quota del terreno dal DEM
+
+const DEM_URL = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp'
+const DEM_ZOOM = 14 // massimo dettaglio di Mapterhorn sul Trentino (LiDAR PAT)
+const DEM_TILE = 512
+
+/** Quota (m) nel punto e la massima entro `radius` metri, letta UNA volta dal tile DEM a z14
+ *  (codifica terrarium: quota = R·256 + G + B/256 − 32768). null se il tile non arriva. */
+export async function demElevation(lon: number, lat: number, radius = 60): Promise<{ at: number; max: number } | null> {
+  const n = 2 ** DEM_ZOOM
+  const fx = ((lon + 180) / 360) * n
+  const fy = ((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n
+  const tx = Math.floor(fx)
+  const ty = Math.floor(fy)
+  try {
+    const res = await fetch(DEM_URL.replace('{z}', String(DEM_ZOOM)).replace('{x}', String(tx)).replace('{y}', String(ty)))
+    if (!res.ok) return null
+    const bmp = await createImageBitmap(await res.blob())
+    const c = document.createElement('canvas')
+    c.width = bmp.width
+    c.height = bmp.height
+    const g = c.getContext('2d', { willReadFrequently: true })!
+    g.drawImage(bmp, 0, 0)
+    const size = bmp.width || DEM_TILE
+    const px = Math.min(size - 1, Math.floor((fx - tx) * size))
+    const py = Math.min(size - 1, Math.floor((fy - ty) * size))
+    const mPerPx = (40_075_016 * Math.cos((lat * Math.PI) / 180)) / n / size
+    const r = Math.max(1, Math.ceil(radius / mPerPx))
+    const x0 = Math.max(0, px - r)
+    const y0 = Math.max(0, py - r)
+    const w = Math.min(size, px + r + 1) - x0
+    const hh = Math.min(size, py + r + 1) - y0
+    const data = g.getImageData(x0, y0, w, hh).data
+    const ele = (i: number) => data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768
+    let max = -Infinity
+    for (let yy = 0; yy < hh; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        if ((xx + x0 - px) ** 2 + (yy + y0 - py) ** 2 > r * r) continue
+        max = Math.max(max, ele((yy * w + xx) * 4))
+      }
+    }
+    const at = ele(((py - y0) * w + (px - x0)) * 4)
+    return Number.isFinite(at) && at > -500 && at < 5000 ? { at, max } : null
+  } catch {
+    return null
+  }
+}
+
 /** Apre l'anteprima. Restituisce la funzione per chiuderla. */
 export function startPreview(o: PreviewOptions): () => void {
   active?.()
@@ -72,6 +138,7 @@ export function startPreview(o: PreviewOptions): () => void {
     maxPitch: map.getMaxPitch(),
     maxZoom: map.getMaxZoom(),
     pixelRatio: map.getPixelRatio(),
+    clamped: map.getCenterClampedToGround(),
   }
   const restore = o.prepare()
 
@@ -93,20 +160,29 @@ export function startPreview(o: PreviewOptions): () => void {
 
   // --- terreno, cielo, qualità
   map.setMaxPitch(85)
-  map.setMaxZoom(22)
+  map.setMaxZoom(24)
+  // La camera sta a quota assoluta: MapLibre non deve riagganciare il centro al terreno a ogni
+  // tile che arriva (con la camera quasi orizzontale il centro è lontano e la sua quota cambia,
+  // e con lei quella della camera: era il "salto su e giù").
+  map.setCenterClampedToGround(false)
   if (o.mobile) map.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25))
   map.setTerrain({ source: 'terrain', exaggeration: 1 })
   for (const hd of [map.dragPan, map.dragRotate, map.scrollZoom, map.touchZoomRotate, map.doubleClickZoom, map.keyboard, map.touchPitch, map.boxZoom]) hd.disable()
   document.body.classList.add('fly3d')
 
-  const groundNow = () => {
-    const t = map.queryTerrainElevation(o.point)
-    return Math.max(o.ground, t ?? -Infinity)
-  }
+  // Quota del terreno: calcolata una volta sola (profilo altimetrico, poi DEM z14 appena arriva).
+  let ground = o.ground
+  let ready = false
+  const camAlt = () => ground + height
   function place(): void {
-    const ground = groundNow()
-    const cam = map.calculateCameraOptionsFromCameraLngLatAltRotation(o.point, ground + height, bearing, 90 + gimbal)
-    map.jumpTo(cam)
+    if (!ready) return
+    // Posizione e quota fisse; cambiano solo direzione (bearing) e inclinazione (pitch).
+    const g = (gimbal * Math.PI) / 180
+    const target = destination(o.point, bearing, Math.max(0.5, LOOK_M * Math.cos(g)))
+    const ll = (c: [number, number]) => ({ lng: c[0], lat: c[1] }) as unknown as LngLat
+    const cam = map.calculateCameraOptionsFromTo(ll(o.point), camAlt(), ll(target), camAlt() + LOOK_M * Math.sin(g))
+    // `cam` porta anche l'elevation del centro: con l'aggancio al suolo spento resta quella.
+    map.jumpTo({ ...cam, bearing, pitch: 90 + gimbal })
     info()
   }
 
@@ -208,9 +284,8 @@ export function startPreview(o: PreviewOptions): () => void {
     drawPlay()
     bearing = bearingTo(o.point, x.p.lngLat)
     // Inclinazione per inquadrare il punto (dalla quota del drone a quella del POI).
-    const camAlt = groundNow() + height
-    const target = x.p.ele ?? map.queryTerrainElevation(x.p.lngLat) ?? camAlt - 100
-    gimbal = clamp((-Math.atan2(camAlt - target, x.dist) * 180) / Math.PI, -90, -2)
+    const target = x.p.ele ?? map.queryTerrainElevation(x.p.lngLat) ?? camAlt() - 100
+    gimbal = clamp((-Math.atan2(camAlt() - target, x.dist) * 180) / Math.PI, -90, -2)
     tSlider.input.value = String(Math.round(gimbal))
     tSlider.input.dispatchEvent(new Event('input'))
     lookAt = x.p
@@ -240,7 +315,6 @@ export function startPreview(o: PreviewOptions): () => void {
   document.body.append(root)
 
   function info(): void {
-    const ground = groundNow()
     const parts = [`Terreno ${it(Math.round(ground))} m`, `drone ${height} m sopra (${it(Math.round(ground + height))} m s.l.m.)`]
     if (lookAt) parts.push(`${lookAt.nome} a ${it(distance(o.point, lookAt.lngLat) / 1000, 1)} km`)
     readout.textContent = parts.join(' · ')
@@ -305,9 +379,6 @@ export function startPreview(o: PreviewOptions): () => void {
   surface.addEventListener('pointerup', up)
   surface.addEventListener('pointercancel', up)
 
-  // Il terreno arriva a pezzi: quando cambia, la camera si riallinea all'altezza giusta.
-  const onIdle = () => place()
-  map.on('idle', onIdle)
   const onResize = () => map.setVerticalFieldOfView(verticalFov(map.getCanvas().clientWidth, map.getCanvas().clientHeight))
 
   // --- salva immagine (scena + didascalia)
@@ -356,11 +427,11 @@ export function startPreview(o: PreviewOptions): () => void {
     surface.removeEventListener('pointermove', move)
     surface.removeEventListener('pointerup', up)
     surface.removeEventListener('pointercancel', up)
-    map.off('idle', onIdle)
     window.removeEventListener('resize', onResize)
     root.remove()
     document.body.classList.remove('fly3d')
     map.setTerrain(null)
+    map.setCenterClampedToGround(before.clamped)
     map.setSky({ 'sky-color': '#88C6FC', 'horizon-color': '#ffffff', 'fog-color': '#ffffff', 'atmosphere-blend': 0 })
     if (map.getLayer('hillshade')) {
       for (const p of ['hillshade-method', 'hillshade-illumination-anchor', 'hillshade-illumination-direction', 'hillshade-illumination-altitude'] as const) map.setPaintProperty('hillshade', p, undefined)
@@ -388,8 +459,15 @@ export function startPreview(o: PreviewOptions): () => void {
   onResize()
   window.addEventListener('resize', onResize)
   light()
-  place()
-  if (rotating) loop()
+  readout.textContent = 'Calcolo la quota del terreno…'
   exit.focus()
+  // Prima la quota dal DEM (al massimo 4 s, altrimenti resta quella del profilo), poi la camera.
+  void Promise.race([demElevation(o.point[0], o.point[1]), new Promise<null>((r) => setTimeout(() => r(null), 4000))]).then((dem) => {
+    if (closed) return
+    if (dem) ground = dem.at
+    ready = true
+    place()
+    if (rotating) loop()
+  })
   return active
 }
