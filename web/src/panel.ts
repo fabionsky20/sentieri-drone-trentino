@@ -113,6 +113,7 @@ export interface CardOptions {
   saved: boolean
   done?: boolean // l'ho già fatto tutto
   started?: boolean // iniziato ma non finito
+  vol?: HTMLElement | null // bollino della volabilità del giorno
   who?: string | null // "aggiunto da …" nella lista condivisa
   onOpen: () => void
   onRemove?: () => void
@@ -129,6 +130,7 @@ export function trailCard(t: Trail, o: CardOptions): HTMLElement {
       o.closed ? h('span', { class: 'pill tiny closed' }, h('i', { class: 'dot rosso' }), 'CHIUSO') : null,
       o.done ? h('span', { class: 'done-mark', title: 'Già fatto' }, icon('check', 14)) : o.started ? h('span', { class: 'done-mark', title: 'Iniziato, non finito' }, icon('half', 14)) : null,
       o.saved ? h('span', { class: 'saved-mark', title: 'Salvato' }, icon('bookmarkFilled', 14)) : null,
+      o.vol ?? null,
       h('span', { class: 'mono card-km' }, kmVal((t.lunghezza_m ?? 0) / 1000)),
     ),
     h('span', { class: 'card-title' }, t.titolo),
@@ -160,6 +162,7 @@ export interface TrailView {
   profile: HTMLElement // contenitore del profilo, riempito da chi chiama
   photos: HTMLElement // contenitore delle foto, riempito da chi chiama
   mine?: HTMLElement // le mie uscite e la nota personale, riempito da chi chiama
+  weather?: HTMLElement // meteo e volabilità, riempito da chi chiama
   onZone: (ids: string[]) => void
   onPoi: (id: string) => void
   onFit: () => void
@@ -264,6 +267,7 @@ export function renderTrail(v: TrailView): HTMLElement {
       kmLegend(v.trailKm),
       segmentSection(v),
     ),
+    v.weather ?? null,
     v.mine ?? null,
     h('section', {}, sectionHead('Profilo', fit), v.profile),
     poiChips(v),

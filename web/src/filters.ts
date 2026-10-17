@@ -24,6 +24,9 @@ export interface FilterState {
   gruppo: string // '' = tutti
   fatti: Fatti
   segnaFatti: boolean // segno sulla mappa per i sentieri già fatti (non è un filtro)
+  volMin: number | null // volabilità minima del giorno (0–100)
+  ordina: 'aria' | 'volabilita' // ordine dei risultati
+  coloraVol: boolean // sulla mappa: colori per volabilità invece che per spazio aereo
 }
 
 export const defaultFilters = (): FilterState => ({
@@ -40,6 +43,9 @@ export const defaultFilters = (): FilterState => ({
   gruppo: '',
   fatti: '',
   segnaFatti: true,
+  volMin: null,
+  ordina: 'aria',
+  coloraVol: false,
 })
 
 /** Quanti filtri sono attivi (per il numerino sul pulsante). */
@@ -54,7 +60,8 @@ export function activeCount(f: FilterState): number {
     Number(!!f.gruppo) +
     Number(f.soloAperti) +
     Number(!!f.salvati) +
-    Number(!!f.fatti)
+    Number(!!f.fatti) +
+    Number(f.volMin != null)
   )
 }
 
@@ -68,6 +75,7 @@ export interface TrailContext {
   shared: boolean // nella lista condivisa
   done: boolean // completato (le uscite coprono tutto il sentiero)
   started: boolean // iniziato ma non finito
+  vol: number | null // indice di volabilità del giorno (null = non calcolato)
 }
 
 export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
@@ -89,6 +97,7 @@ export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
   if (f.dislMax != null && (t.dislivello_pos ?? 0) > f.dislMax) return false
   if (f.quotaMin != null && (t.quota_max ?? 0) < f.quotaMin) return false
   if (f.gruppo && t.gruppo_montuoso !== f.gruppo) return false
+  if (f.volMin != null && (ctx.vol == null || ctx.vol < f.volMin)) return false
   return true
 }
 
@@ -283,8 +292,33 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     onChange()
   })
 
+  // VOLABILITÀ (meteo del giorno scelto)
+  const volTile = sliderTile('Volabilità minima', f.volMin, { min: 0, max: 90, step: 10, off: 0, fmt: (v) => `≥ ${v}` }, (v) => {
+    f.volMin = v
+    onChange()
+  })
+  volTile.classList.add('wide')
+  const ordina = segmented<FilterState['ordina']>(
+    [
+      ['aria', 'Ordina per spazio aereo'],
+      ['volabilita', 'Ordina per volabilità'],
+    ],
+    f.ordina,
+    (v) => {
+      f.ordina = v
+      onChange()
+    },
+    'small',
+  )
+  const colora = switchRow('Colora i sentieri per volabilità', f.coloraVol, (on) => {
+    f.coloraVol = on
+    onChange()
+  })
+  const volHelp = h('p', { class: 'hint' }, 'Indice 0–100 dal meteo del giorno scelto (vento, pioggia, nuvole, luce, Kp) e dallo spazio aereo. Calcolato per i sentieri nella zona della mappa.')
+
   form.append(
     h('section', {}, label('Volo'), volo, verdeTile, voloHelp),
+    h('section', {}, label('Volabilità del giorno'), volTile, ordina, h('div', { class: 'switches' }, colora), volHelp),
     h('section', {}, label('Passa vicino a'), near),
     h('section', {}, label('Difficoltà'), diff),
     h('section', {}, grid),

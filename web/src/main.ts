@@ -16,8 +16,12 @@ import { renderProfile, type ProfileEl } from './profile'
 import type { AccountState } from './account'
 import type { BoardsState } from './boards'
 import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, type BoardsActions, type TrailInfo } from './boardsui'
+import { airFactor, droneProfile, scoreHour, summarize, type DaySummary } from './flyindex'
+import { LISTA_METEO, MAX_SENTIERI } from './flyconfig'
+import { forecastState, getKp, getWeather, gridPoint, kpAt, weatherPaused, type WxPoint } from './weather'
+import { renderWeather, volChip, type WxPointView, type WxStatus } from './weatherui'
 import { applyRoute, gpxDraft, newDraft, renderMyTrail, renderStats, type OutingActions, type OutingDraft, type Person } from './outingsui'
-import { coverage, nearestTrail, parseGpx, proposeFromGpx, type GpxTrack, type Outing } from './outings'
+import { coverage, elevAt, nearestTrail, parseGpx, proposeFromGpx, type GpxTrack, type Outing } from './outings'
 import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, renderWelcomeInvite, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt, sliceLine } from './trailgeom'
@@ -169,6 +173,15 @@ type Selection =
   | { kind: 'poi'; id: string; back?: Selection }
   | null
 let selection: Selection = null
+// Meteo e volabilità del giorno (solo in memoria e nella cache del browser, mai su Firestore).
+let wxSummaries = new Map<string, DaySummary>() // sentiero → indice del giorno
+let wxKey = '' // giorno|profilo drone a cui si riferiscono gli indici
+let wxStatus: WxStatus = 'caricamento'
+let wxHour: number | null = null // ora scelta nella scheda
+let wxBase: Trail[] = [] // sentieri che passano gli altri filtri (per scegliere dove calcolare)
+let wxTimer = 0
+const wxPts = new Map<string, WxPointView[] | null>() // sentiero → punti (alto, centro) con meteo
+const wxFailed = new Set<string>() // sentieri senza previsione (risposta incompleta)
 const filters = defaultFilters()
 const poiVisible = new Set<PoiCategory>(
   stored<PoiCategory[]>(
@@ -758,6 +771,9 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const back: Selection = { kind: 'trail', id: trail.id, seg: segId }
   const seg = segId ? segById.get(segId) : undefined
   currentSave = { trailId: trail.id, box: foot }
+  const wxBox = h('section', { class: 'wxbox' })
+  currentWx = { trailId: trail.id, box: wxBox }
+  renderWeatherBox()
   const myBox = h('section', { class: 'mybox' })
   currentMine = { trailId: trail.id, box: myBox }
   renderMyTrailBox(true)
@@ -775,6 +791,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     profile: profileBox,
     photos: photosSection(photoPoints, 1500),
     mine: myBox,
+    weather: wxBox,
     onZone: (ids) => select({ kind: 'zones', ids, back }),
     onPoi: (id) => select({ kind: 'poi', id, back }),
     onFit: () => fitTrail(trail),
@@ -790,6 +807,8 @@ function render(): void {
   map.setFilter('zone-sel', ['in', ['get', 'zona_id'], ['literal', selection?.kind === 'zones' ? selection.ids : []]])
   map.setFilter('poi-sel', ['==', ['get', 'id'], selection?.kind === 'poi' ? selection.id : ''])
   currentMine = null
+  currentWx = null
+  wxHour = null
   if (!selection) {
     sheet.hidden = true
     currentSave = null
@@ -826,6 +845,7 @@ function render(): void {
   if (!mobile() && (!leftOpen || (tablet() && rightView))) setLeft(true)
   body.scrollTop = 0
   if (mobile()) setTabSilently('map') // su telefono la scheda sta sopra la mappa
+  if (s.kind === 'trail' && !wxSummaries.has(s.id)) scheduleWeather()
 }
 
 /** Torna alla mappa senza deselezionare (usato quando si apre una scheda da una lista). */
@@ -904,6 +924,7 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
     saved: !!acct?.miei.has(t.id) || inBoards(t.id),
     done: doneSet.has(t.id),
     started: startedSet.has(t.id),
+    vol: volChip(wxSummaries.get(t.id)?.index),
     ...extra,
     onOpen: () => {
       select({ kind: 'trail', id: t.id })
@@ -912,13 +933,14 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
   })
 }
 
-function applyFilters(): void {
+function applyFilters(fromWeather = false): void {
   const cov = doneCoverage()
   doneSet = new Set([...cov].filter(([, c]) => c.complete).map(([id]) => id))
   startedSet = new Set([...cov].filter(([, c]) => !c.complete).map(([id]) => id))
   const active = activeCount(filters)
   const ok = new Set<string>()
   const results: Trail[] = []
+  const base: Trail[] = []
   for (const t of trailList) {
     const ctx = {
       km: kmOf(t.id),
@@ -927,12 +949,15 @@ function applyFilters(): void {
       shared: inBoards(t.id),
       done: doneSet.has(t.id),
       started: startedSet.has(t.id),
+      vol: wxSummaries.get(t.id)?.index ?? null,
     }
+    if (matches(t, { ...ctx, vol: null }, { ...filters, volMin: null })) base.push(t)
     if (matches(t, ctx, filters)) {
       ok.add(t.id)
       results.push(t)
     }
   }
+  wxBase = base
   for (const f of segments.features) {
     map.setFeatureState({ source: 'segments', id: f.properties.id }, { off: active > 0 && !ok.has(f.properties.sentiero_id) })
   }
@@ -943,8 +968,9 @@ function applyFilters(): void {
     $(id).textContent = String(active)
   }
 
-  // Prima i più volabili nella data scelta (km verdi, poi gialli).
+  // Prima i più volabili nella data scelta (km verdi, poi gialli), oppure per indice di volabilità.
   results.sort((a, b) => kmOf(b.id).verde - kmOf(a.id).verde || kmOf(b.id).giallo - kmOf(a.id).giallo)
+  if (filters.ordina === 'volabilita') results.sort((a, b) => (wxSummaries.get(b.id)?.index ?? -1) - (wxSummaries.get(a.id)?.index ?? -1))
   const n = fmtCount(results.length)
   $('filters-summary').textContent =
     (active === 0 ? `${n} sentieri · nessun filtro` : `${n} di ${fmtCount(trailList.length)} sentieri`) +
@@ -954,6 +980,8 @@ function applyFilters(): void {
   const shown = results.slice(0, MAX_RESULTS_SHOWN)
   $('filters-results').replaceChildren(...shown.map((t) => cardFor(t)))
   $('results-list').replaceChildren(...shown.map((t) => cardFor(t)))
+  paintVolMap()
+  if (!fromWeather) scheduleWeather()
 }
 drawForm()
 drawPoiToggles()
@@ -1100,6 +1128,7 @@ let boardsSt: BoardsState | null = null
 let accountModule: Promise<typeof import('./account')> | null = null
 let currentSave: { trailId: string; box: HTMLElement } | null = null
 let currentMine: { trailId: string; box: HTMLElement } | null = null
+let currentWx: { trailId: string; box: HTMLElement } | null = null
 let outingDraft: { trailId: string; draft: OutingDraft } | null = null
 let doneSet = new Set<string>() // sentieri completati (le uscite li coprono tutti)
 let startedSet = new Set<string>() // iniziati ma non finiti
@@ -1354,6 +1383,212 @@ function setWalkPreview(trailId: string, p: { from: number; to: number; at: numb
     currentProfile.el.setPin({ from: p.from * r, to: p.to * r, at: p.at * r })
   }
 }
+
+// ---- meteo e volabilità
+
+const GENERIC_DRONES = [
+  { id: 'gen:mini', label: 'Generico sub-250 g', peso_g: 249 },
+  { id: 'gen:leggero', label: 'Generico 250–900 g', peso_g: 600 },
+  { id: 'gen:medio', label: 'Generico oltre 900 g', peso_g: 950 },
+]
+
+/** Drone per le soglie del vento: scelto nella scheda (ricordato dal browser), altrimenti il
+ *  primo dell'hangar, altrimenti un sub-250 g generico. */
+function weatherDrones(): { id: string; label: string; peso_g: number }[] {
+  const mine = (acct?.status === 'pronto' ? acct.droni : []).map((d) => ({ id: d.id, label: `${d.modello} · ${d.peso_g} g`, peso_g: d.peso_g }))
+  return [...mine, ...GENERIC_DRONES]
+}
+function selectedDrone(): { id: string; label: string; peso_g: number } {
+  const list = weatherDrones()
+  const want = stored<string>('drone-meteo', '')
+  return list.find((d) => d.id === want) ?? list[0]
+}
+
+/** Punti del sentiero per il meteo: il più alto e quello centrale, con la loro quota. */
+function trailWxPoints(t: Trail, profiles: Record<string, Profile>): { label: string; ele: number; point: WxPoint }[] {
+  const line = trailLines.get(t.id)
+  const prof = profiles[t.id]
+  if (!line) return []
+  const L = line.length
+  if (!prof || !prof.q.length) {
+    const c = pointAt(line, L / 2)
+    const ele = t.quota_max ?? 1500
+    return [{ label: 'Centro del sentiero', ele, point: gridPoint(c[0], c[1], ele) }]
+  }
+  let hi = 0
+  prof.q.forEach((q, i) => {
+    if (q > prof.q[hi]) hi = i
+  })
+  const mHi = ((hi * prof.passo) / prof.lung) * L
+  const pHi = pointAt(line, mHi)
+  const pMid = pointAt(line, L / 2)
+  const eMid = elevAt(prof, L / 2, L)
+  return [
+    { label: 'Punto più alto', ele: prof.q[hi], point: gridPoint(pHi[0], pHi[1], prof.q[hi]) },
+    { label: 'Centro del sentiero', ele: eMid, point: gridPoint(pMid[0], pMid[1], eMid) },
+  ]
+}
+
+/** Dove calcolare: il sentiero aperto + quelli che passano i filtri nella zona della mappa,
+ *  i più vicini al centro, fino a MAX_SENTIERI (niente richieste per tutto il Trentino). */
+function weatherScope(): Trail[] {
+  const b = map.getBounds()
+  const c = map.getCenter()
+  const inView = wxBase.filter((t) => !(t.bbox[2] < b.getWest() || t.bbox[0] > b.getEast() || t.bbox[3] < b.getSouth() || t.bbox[1] > b.getNorth()))
+  const dist = (t: Trail) => Math.hypot((t.bbox[0] + t.bbox[2]) / 2 - c.lng, (t.bbox[1] + t.bbox[3]) / 2 - c.lat)
+  // Anche i primi della lista dei risultati (in ordine di spazio aereo), così hanno il bollino.
+  const top = [...wxBase].sort((x, y) => kmOf(y.id).verde - kmOf(x.id).verde || kmOf(y.id).giallo - kmOf(x.id).giallo).slice(0, LISTA_METEO)
+  const list = [...new Set([...top, ...inView.sort((x, y) => dist(x) - dist(y))])].slice(0, MAX_SENTIERI)
+  const sel = selection?.kind === 'trail' ? trails.get(selection.id) : undefined
+  if (sel && !list.includes(sel)) list.unshift(sel)
+  return list
+}
+
+function scheduleWeather(): void {
+  clearTimeout(wxTimer)
+  wxTimer = window.setTimeout(() => void refreshWeather(), 400)
+}
+
+async function refreshWeather(): Promise<void> {
+  const prof = droneProfile(selectedDrone())
+  const key = `${day}|${prof}`
+  if (key !== wxKey) {
+    wxKey = key
+    wxSummaries = new Map()
+    wxPts.clear()
+    wxFailed.clear()
+    wxHour = null
+  }
+  const state = forecastState(day)
+  if (state !== 'ok') {
+    wxStatus = state
+    afterWeather()
+    return
+  }
+  const need = weatherScope().filter((t) => !wxSummaries.has(t.id))
+  if (!need.length) {
+    wxStatus = 'ok'
+    return
+  }
+  if (!wxSummaries.size) {
+    wxStatus = 'caricamento'
+    renderWeatherBox()
+  }
+  try {
+    const profiles = await getProfiles()
+    const pts = new Map(need.map((t) => [t.id, trailWxPoints(t, profiles)]))
+    const [wx, kp] = await Promise.all([getWeather(day, [...pts.values()].flat().map((p) => p.point)), getKp().catch(() => null)])
+    if (key !== wxKey) return // nel frattempo è cambiato giorno o drone
+    for (const t of need) {
+      const list = pts.get(t.id) ?? []
+      const views = list.map((p) => ({ label: p.label, ele: Math.round(p.ele), wx: wx.get(p.point.key) }))
+      if (!views.length || views.some((v) => !v.wx)) {
+        if (!weatherPaused()) wxFailed.add(t.id)
+        continue
+      }
+      const full = views as WxPointView[]
+      const air = airFactor((trailLines.get(t.id)?.segs ?? []).map((s) => eff.get(s.id)).filter((e): e is Effective => !!e))
+      const hours = Array.from({ length: 24 }, (_, h) => scoreHour(full.map((v) => v.wx), h, prof, air, kpAt(kp, day, h, full[0].wx.utcOffset)))
+      wxSummaries.set(t.id, summarize(hours))
+      wxPts.set(t.id, full)
+    }
+    wxStatus = 'ok'
+  } catch {
+    wxStatus = wxSummaries.size ? 'ok' : 'errore'
+  }
+  afterWeather()
+}
+
+function afterWeather(): void {
+  applyFilters(true)
+  renderWeatherBox()
+  // Open-Meteo ha chiesto di rallentare: si riprova da soli tra un minuto.
+  if (weatherPaused()) {
+    clearTimeout(wxTimer)
+    wxTimer = window.setTimeout(() => void refreshWeather(), 61_000)
+  }
+}
+
+/** Sezione "Meteo e volabilità" nella scheda del sentiero. */
+function renderWeatherBox(): void {
+  if (!currentWx) return
+  const { trailId, box } = currentWx
+  const state = forecastState(day)
+  const drone = selectedDrone()
+  box.replaceChildren(
+    renderWeather({
+      day,
+      status: state !== 'ok' ? state : wxSummaries.has(trailId) ? 'ok' : weatherPaused() ? 'pausa' : wxStatus === 'errore' || wxFailed.has(trailId) ? 'errore' : 'caricamento',
+      summary: wxSummaries.get(trailId) ?? null,
+      points: wxPts.get(trailId) ?? [],
+      hour: wxHour,
+      onHour: (hr) => {
+        wxHour = hr
+        renderWeatherBox()
+      },
+      drones: weatherDrones().map((d) => ({ id: d.id, label: d.label })),
+      droneId: drone.id,
+      onDrone: (id) => {
+        store('drone-meteo', id)
+        scheduleWeather()
+      },
+      profile: droneProfile(drone),
+    }),
+  )
+}
+
+/** Colori della mappa: spazio aereo (default) oppure volabilità del giorno. */
+const LINE_COLOR_AIR = colorExpr('c')
+const LINE_COLOR_VOL = [
+  'case',
+  ['<', ['coalesce', ['feature-state', 'vol'], -1], 0],
+  '#9AA5A1',
+  ['<', ['feature-state', 'vol'], 30],
+  COLORS.rosso,
+  ['<', ['feature-state', 'vol'], 60],
+  COLORS.giallo,
+  COLORS.verde,
+] as unknown as string
+let volPainted = false
+
+function paintVolMap(): void {
+  if (!filters.coloraVol) {
+    if (volPainted) {
+      map.setPaintProperty('seg-line', 'line-color', LINE_COLOR_AIR)
+      setLegend(false)
+      volPainted = false
+    }
+    return
+  }
+  // Indice per tratto: rosso = 0; giallo = penalità del tratto rispetto al migliore del sentiero.
+  for (const f of segments.features) {
+    const s = wxSummaries.get(f.properties.sentiero_id)
+    let vol: number | null = null
+    if (s) {
+      const effs = (trailLines.get(f.properties.sentiero_id)?.segs ?? []).map((x) => eff.get(x.id)).filter((e): e is Effective => !!e)
+      const best = airFactor(effs).f
+      const mine = airFactor([eff.get(f.properties.id)!]).f
+      vol = best > 0 ? Math.round((s.index * mine) / best) : 0
+    }
+    map.setFeatureState({ source: 'segments', id: f.properties.id }, { vol })
+  }
+  if (!volPainted) {
+    map.setPaintProperty('seg-line', 'line-color', LINE_COLOR_VOL)
+    setLegend(true)
+    volPainted = true
+  }
+}
+
+function setLegend(vol: boolean): void {
+  const items = $('legend').querySelectorAll('.legend-lines li')
+  const text = vol ? ['Volabile (≥ 60)', 'Discreta (30–59)', 'Scarsa (< 30)'] : ['Libero 120 m', 'Quota limitata', 'No / autorizz.']
+  items.forEach((li, i) => {
+    li.lastChild!.textContent = text[i]
+  })
+  $('legend').classList.toggle('vol', vol)
+}
+
+map.on('moveend', () => scheduleWeather())
 
 /** Statistiche → "Mostra sulla mappa": filtro "Solo fatti" e zoom sui sentieri fatti. */
 function showDoneOnMap(ids: string[]): void {

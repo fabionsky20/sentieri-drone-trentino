@@ -10,7 +10,7 @@ Questo file è il riferimento per tutte le fasi. Dettagli sui dati reali: [docs/
 ## Roadmap (sintesi) — dettagli in [docs/ROADMAP.md](docs/ROADMAP.md)
 
 - **Uso attuale privato** (gruppo di ~10 amici), **costo zero**: GitHub Pages + Firebase Spark. Niente di commerciale (no ads, no pagamenti) finché non ci saranno permessi da D-Flight.
-- **Fase 1 Fondamenta:** A login aperto + profilo + hangar ✅ → B bacheche condivise con inviti ✅ → C note sui sentieri, "segna come fatto", statistiche ✅ → D meteo e indice di volabilità.
+- **Fase 1 Fondamenta:** A login aperto + profilo + hangar ✅ → B bacheche condivise con inviti ✅ → C note sui sentieri, "segna come fatto", statistiche ✅ → D meteo e indice di volabilità ✅.
 - **Fase 2 Beta:** PWA offline, notifiche push, anteprima di volo 3D (camera a 120 m che ruota a 360°), ostacoli da OSM (cavi, linee elettriche, elisuperfici), segnalazioni con scadenza, Android in test chiuso.
 - **Dopo:** luce/ora d'oro, mare di nubi, "cosa vedo da qui", punti di decollo, badge, card Instagram, lista inquadrature.
 - **REGOLA FISSA: l'app non registra, chiede o mostra MAI la quota a cui l'utente ha volato, né importa log di volo. Nessuna statistica di quota volata.** Si mostrano solo i limiti dello spazio aereo.
@@ -127,6 +127,7 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
   - Gli avvisi "Cross-Origin-Opener-Policy … window.closed" in console durante il login con popup sono noti e innocui.
 - **Fase 6** ✅ redesign grafico (solo estetica e layout). Regole in "Design" qui sotto.
 - **Roadmap Fase 1 · passo A** ✅ nome "Quota 120", manifest PWA (`web/public/`), login aperto, profilo, onboarding, hangar, scadenze. Vedi "Account" qui sotto.
+- **Roadmap Fase 1 · passo D** ✅ meteo Open-Meteo + Kp NOAA, indice di volabilità. Vedi "Meteo e volabilità" qui sotto.
 - **Roadmap Fase 1 · passo C** ✅ note personali, "segna come fatto", GPX, fatti sulla mappa, statistiche private. Vedi "Uscite e statistiche" qui sotto.
 - **Roadmap Fase 1 · passo B** ✅ bacheche condivise con ruoli, inviti (link e ricerca per nome), "ci sto", note, notifiche in-app, migrazione di "Condivisi". Vedi "Bacheche" qui sotto.
 
@@ -157,6 +158,15 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
 - Km e D+ di un'uscita: dal GPX se presente, altrimenti dal sentiero. "Con chi": amici dell'app (invitati, chi mi ha invitato, membri delle bacheche) o nomi liberi.
 - **Uscite parziali** ("fin dove sono arrivato"): capo di partenza + metri fatti (`fino_m`), andata e ritorno facoltativo. Il punto di arrivo si sceglie con slider, km scritti (testo con virgola) o scorciatoie sui POI; anteprima con omino sulla mappa (`walkMarker`, sorgente `walk-preview`) e sul profilo (`ProfileEl.setPin`). Dal GPX: `matchTrail` dà la parte coperta, `proposeFromGpx` propone capo, metri e A/R. `coverage()` unisce le parti: ≥ 97 % = completato (`DONE_SHARE`), altrimenti "iniziato". Km e D+ della parte fatta: dal GPX, altrimenti dal profilo nel verso di marcia (× andata e ritorno).
 - Mappa: layer `seg-done` sulla sorgente `done-parts` (solo le parti fatte, ritagliate con `sliceLine`; puntinato scuro sui sentieri fatti, interruttore "Segna sulla mappa i sentieri fatti"); filtro `fatti` ('' / 'no' / 'iniziati' / 'si'). IMPORTA GPX dal profilo apre il sentiero più vicino con il modulo già compilato.
+
+## Meteo e volabilità (Roadmap Fase 1 · D)
+
+- **Soglie in `web/src/flyconfig.ts`** (file pensato per essere regolato dall'utente): vento in quota/raffiche per profilo di drone (`mini` < 250 g, `leggero` < 900 g, `medio`), pioggia, nuvole basse, visibilità, Kp, luce, penalità dello spazio aereo, livelli e soglie della frase, griglia e limiti di richiesta.
+- `web/src/weather.ts`: Open-Meteo multi-punto (`elevation` = quota del punto), punti agganciati a griglia 0,05° × fascia di quota 200 m (`gridPoint`), cache in memoria + localStorage (`meteo-cache-v1`, 1 ora), pausa di un minuto su 429/503 (`weatherPaused`). Kp da `services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json` (blocchi di 3 ore UTC, circa 3 giorni). Previsioni solo da oggi a +15 giorni (`forecastState`). **Nessun dato meteo su Firestore.**
+- `web/src/flyindex.ts`: indice orario = 100 × prodotto dei fattori (peggiore tra punto più alto e centrale); spazio aereo = tratto migliore del sentiero nella data (rosso 0, giallo penalità per quota). Indice del giorno = migliori 3 ore consecutive di luce; finestra = serie più lunga di ore ≥ 60; motivo = fattore che limita di più.
+- `web/src/weatherui.ts`: sezione "Meteo e volabilità" nella scheda (`TrailView.weather`), striscia oraria cliccabile, tabella per ora (temperatura, pioggia, vento 10/80/120 m, raffiche, nuvole basse, visibilità, Kp), alba/tramonto, scelta del drone (hangar + generici, ricordata in localStorage `drone-meteo`); bollino `volChip` nelle card.
+- In `main.ts`: `refreshWeather` (debounce su giorno, filtri, spostamento mappa, sentiero aperto) calcola solo per il sentiero aperto + primi `LISTA_METEO` risultati + sentieri nella zona della mappa, fino a `MAX_SENTIERI`. Punto più alto e centrale dai profili altimetrici (`profiles.json`). Filtro `volMin`, ordinamento `ordina`, mappa per volabilità `coloraVol` (feature-state `vol` per tratto, legenda che cambia).
+- Prove: le prove che non riguardano il meteo intercettano Open-Meteo/NOAA con risposte finte (non consumano la quota gratuita: 10.000 punti al giorno, limite al minuto).
 
 ## Design (fase 6)
 

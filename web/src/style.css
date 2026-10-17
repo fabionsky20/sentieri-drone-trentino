@@ -3142,3 +3142,217 @@ button:disabled {
   border: 2px solid #fff;
   box-shadow: 0 1px 5px rgb(0 0 0 / 0.45);
 }
+
+/* ---- meteo e indice di volabilità ---- */
+
+.volchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.volchip .dot,
+.wxhead .wxindex {
+  flex: none;
+}
+
+.v-good .dot {
+  background: var(--verde);
+}
+
+.v-mid .dot {
+  background: var(--giallo);
+}
+
+.v-bad .dot {
+  background: var(--rosso);
+}
+
+.wx {
+  display: grid;
+  gap: 10px;
+}
+
+.wx .section-head {
+  margin-bottom: 0;
+}
+
+.wxhead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wxindex {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  border: 3px solid var(--line);
+  background: var(--panel);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wxhead.v-good .wxindex {
+  border-color: var(--verde);
+}
+
+.wxhead.v-mid .wxindex {
+  border-color: var(--giallo);
+}
+
+.wxhead.v-bad .wxindex {
+  border-color: var(--rosso);
+}
+
+.wxlevel {
+  margin: 0;
+  font-family: var(--font-cond);
+  font-weight: 600;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.wxhead .small {
+  margin: 2px 0 0;
+}
+
+.wxstripbox {
+  position: relative;
+  padding-bottom: 16px;
+}
+
+.wxstrip {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 2px;
+  height: 48px;
+}
+
+.wxcell {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: var(--panel2);
+  cursor: pointer;
+}
+
+.wxcell .bar {
+  display: block;
+  width: 100%;
+  border-radius: 3px;
+}
+
+.wxcell.v-good .bar {
+  background: var(--verde);
+}
+
+.wxcell.v-mid .bar {
+  background: var(--giallo);
+}
+
+.wxcell.v-bad .bar {
+  background: var(--rosso);
+}
+
+.wxcell.night .bar {
+  background: #b9c1bd;
+}
+
+.wxcell.sel {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.wxticks {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.wxticks span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.wxwhy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.wxtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.wxtable th,
+.wxtable td {
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.wxtable thead th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.wxtable thead th span {
+  display: block;
+}
+
+.wxtable tbody th {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.wxsun {
+  margin: 0;
+  color: var(--muted);
+}
+
+.wxdrone {
+  margin: 0;
+}
+
+.wxdrone select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  background: var(--panel);
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.wxtable thead th .mono {
+  text-transform: none;
+  font-weight: 500;
+}
