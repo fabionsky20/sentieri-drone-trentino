@@ -13,9 +13,13 @@ export interface ProfileInput {
 }
 
 const PAD = { left: 40, right: 8, top: 14, bottom: 20 }
+
+/** Parte fatta e punto di arrivo (m del profilo), per "fin dove sono arrivato". */
+export type PinRange = { from: number; to: number; at: number }
+export type ProfileEl = HTMLElement & { setPin: (p: PinRange | null) => void }
 const HEIGHT = 150
 
-export function renderProfile(input: ProfileInput): HTMLElement {
+export function renderProfile(input: ProfileInput): ProfileEl {
   const wrap = document.createElement('div')
   wrap.className = 'profile'
   const canvas = document.createElement('canvas')
@@ -27,7 +31,14 @@ export function renderProfile(input: ProfileInput): HTMLElement {
   const readout = document.createElement('div')
   readout.className = 'profile-readout'
   readout.textContent = 'Tocca il profilo per vedere il punto sulla mappa'
-  wrap.append(canvas, cursor, readout)
+  const walked = document.createElement('div')
+  walked.className = 'profile-walked'
+  walked.hidden = true
+  const pin = document.createElement('div')
+  pin.className = 'profile-pin'
+  pin.hidden = true
+  wrap.append(canvas, walked, pin, cursor, readout)
+  let pinState: PinRange | null = null
 
   const { profile } = input
   const xs = profile.q.map((_, i) => Math.min(i * profile.passo, profile.lung))
@@ -107,6 +118,20 @@ export function renderProfile(input: ProfileInput): HTMLElement {
       c.fill()
       c.stroke()
     }
+    placePin()
+  }
+
+  function placePin(): void {
+    walked.hidden = pin.hidden = !pinState || !width
+    if (!pinState || !width) return
+    const { from, to, at } = pinState
+    walked.style.left = `${sx(from)}px`
+    walked.style.width = `${Math.max(0, sx(to) - sx(from))}px`
+    walked.style.top = `${PAD.top}px`
+    walked.style.height = `${HEIGHT - PAD.top - PAD.bottom}px`
+    pin.style.left = `${sx(at)}px`
+    pin.style.top = `${PAD.top - 2}px`
+    pin.style.height = `${HEIGHT - PAD.top - PAD.bottom + 2}px`
   }
 
   function hover(clientX: number): void {
@@ -129,7 +154,12 @@ export function renderProfile(input: ProfileInput): HTMLElement {
   })
 
   new ResizeObserver(draw).observe(wrap)
-  return wrap
+  const el = wrap as unknown as ProfileEl
+  el.setPin = (p) => {
+    pinState = p
+    placePin()
+  }
+  return el
 }
 
 /** Valori "tondi" per gli assi (1, 2, 5 × 10^n). */

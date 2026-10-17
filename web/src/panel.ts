@@ -111,7 +111,8 @@ export interface CardOptions {
   km: Record<Colore, number>
   closed: boolean
   saved: boolean
-  done?: boolean // l'ho già fatto
+  done?: boolean // l'ho già fatto tutto
+  started?: boolean // iniziato ma non finito
   who?: string | null // "aggiunto da …" nella lista condivisa
   onOpen: () => void
   onRemove?: () => void
@@ -126,7 +127,7 @@ export function trailCard(t: Trail, o: CardOptions): HTMLElement {
       { class: 'card-top' },
       h('span', { class: 'mono muted' }, [t.numero, t.difficolta].filter(Boolean).join(' · ')),
       o.closed ? h('span', { class: 'pill tiny closed' }, h('i', { class: 'dot rosso' }), 'CHIUSO') : null,
-      o.done ? h('span', { class: 'done-mark', title: 'Già fatto' }, icon('check', 14)) : null,
+      o.done ? h('span', { class: 'done-mark', title: 'Già fatto' }, icon('check', 14)) : o.started ? h('span', { class: 'done-mark', title: 'Iniziato, non finito' }, icon('half', 14)) : null,
       o.saved ? h('span', { class: 'saved-mark', title: 'Salvato' }, icon('bookmarkFilled', 14)) : null,
       h('span', { class: 'mono card-km' }, kmVal((t.lunghezza_m ?? 0) / 1000)),
     ),

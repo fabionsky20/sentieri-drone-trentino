@@ -17,7 +17,7 @@
 | `users/{uid}/droni/{id}` | `modello`, `classe` (C0/C1/C2/legacy), `peso_g`, `assicurazione_scadenza` | solo l'utente |
 | `users/{uid}/bacheche/{b}` | indice delle bacheche dell'utente | solo l'utente |
 | `users/{uid}/notifiche/{n}` | notifiche in-app (inviti, ingressi, sentieri, ci sto, note), `letta` | solo l'utente (gli altri possono solo crearle, legate a una bacheca comune) |
-| `users/{uid}/uscite/{id}` | sentieri fatti: `sentiero`, `data`, `con` (nomi) + `conUid`, `commento`, `drone` (sì/no), `gpx_km`, `gpx_dplus` | solo l'utente |
+| `users/{uid}/uscite/{id}` | sentieri fatti: `sentiero`, `data`, `con` (nomi) + `conUid`, `commento`, `drone` (sì/no), `gpx_km`, `gpx_dplus`; uscite parziali: `parziale`, `partenza` (inizio/fine), `fino_m` (metri fatti da quel capo), `ar` (andata e ritorno). Senza questi campi l'uscita è completa | solo l'utente |
 | `users/{uid}/note/{sentiero}` | nota personale sul sentiero (`testo`, max 2000) | solo l'utente |
 | `users/{uid}/amici/{uid}` | amici entrati con il mio link: `nome`, `avatar`, `entrato` | solo l'utente (li scrive l'invitato mentre crea il profilo, solo con il codice giusto) |
 | `codiciInvito/{codice}` | link "Invita amici": `uid` e `nome` di chi invita | chiunque abbia il codice (anche senza login), nessun elenco |
@@ -63,7 +63,7 @@ Il file [`firestore.rules`](../firestore.rules) è la copia di riferimento. **Va
 2. Seleziona tutto il testo e sostituiscilo con il contenuto di `firestore.rules` (su GitHub: apri il file → pulsante *Copy raw file*).
 3. **Pubblica**. Ha effetto entro un minuto.
 
-Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 sulle bacheche + 27 sugli inviti all'app + 34 su uscite e note: chi non è membro non legge nulla, chi può solo vedere non scrive, link scaduti o revocati falliscono, nessuno entra senza invito valido, date fino a +10 anni).
+Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 sulle bacheche + 27 sugli inviti all'app + 46 su uscite (anche parziali) e note: chi non è membro non legge nulla, chi può solo vedere non scrive, link scaduti o revocati falliscono, nessuno entra senza invito valido, date fino a +10 anni).
 
 ## Eliminazione account
 

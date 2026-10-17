@@ -65,3 +65,15 @@ export function pointAt(line: TrailLine, m: number): [number, number] {
   const [a, b] = [line.coords[lo], line.coords[hi]]
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
 }
+
+/** Coordinate del sentiero tra `from` e `to` metri dall'inizio (scala della pipeline). */
+export function sliceLine(line: TrailLine, from: number, to: number): [number, number][] {
+  const total = line.cum[line.cum.length - 1]
+  if (!total || line.coords.length < 2 || to - from < 1) return []
+  const a = (Math.max(0, Math.min(line.length, from)) / line.length) * total
+  const b = (Math.max(0, Math.min(line.length, to)) / line.length) * total
+  const out: [number, number][] = [pointAt(line, from)]
+  for (let i = 0; i < line.coords.length; i++) if (line.cum[i] > a && line.cum[i] < b) out.push(line.coords[i])
+  out.push(pointAt(line, to))
+  return out
+}

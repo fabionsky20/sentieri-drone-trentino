@@ -2,12 +2,12 @@
 // REGOLA FISSA: nessuna quota di volo. Si chiede solo "avevo il drone?"; la quota più alta
 // delle statistiche è quella del sentiero, raggiunta a piedi.
 
-import { switchRow } from './filters'
+import { segmented, switchRow } from './filters'
 import { CATEGORIES } from './icons'
-import { COLLECT, computeStats, matchTrail, outingDplus, outingKm, parseGpx, yearsOf, type GpxTrack, type Outing, type OutingInput, type Stats } from './outings'
+import { COLLECT, computeStats, coverage, matchTrail, outingDplus, outingKm, parseGpx, proposeFromGpx, yearsOf, type GpxTrack, type Outing, type OutingInput, type RouteChoice, type Stats } from './outings'
 import { h } from './panel'
-import type { TrailLine } from './trailgeom'
-import type { PoiProps, Trail } from './types'
+import { sliceLine, type TrailLine } from './trailgeom'
+import type { PoiProps, Profile, Trail } from './types'
 import { icon } from './ui'
 
 export interface Person {
@@ -59,10 +59,22 @@ export interface OutingDraft {
   commento: string
   drone: boolean
   gpx: { km: number; dplus: number | null; share: number | null } | null
+  parziale: boolean // "fin dove sono arrivato"
+  partenza: 'inizio' | 'fine'
+  finoM: number | null // metri fatti dal capo di partenza
+  ar: boolean // andata e ritorno
 }
 
 export function newDraft(prefill?: Partial<OutingDraft>): OutingDraft {
-  return { id: null, data: todayIso(), con: [], commento: '', drone: false, gpx: null, ...prefill }
+  return { id: null, data: todayIso(), con: [], commento: '', drone: false, gpx: null, parziale: false, partenza: 'inizio', finoM: null, ar: false, ...prefill }
+}
+
+/** Applica al modulo la parte di sentiero proposta da una traccia GPX. */
+export function applyRoute(d: OutingDraft, r: RouteChoice): void {
+  d.parziale = r.parziale
+  d.partenza = r.partenza
+  d.finoM = r.parziale ? r.finoM : null
+  d.ar = r.ar
 }
 
 export function draftFrom(o: Outing): OutingDraft {
@@ -73,7 +85,113 @@ export function draftFrom(o: Outing): OutingDraft {
     commento: o.commento ?? '',
     drone: o.drone,
     gpx: o.gpxKm != null ? { km: o.gpxKm, dplus: o.gpxDplus, share: null } : null,
+    parziale: o.parziale,
+    partenza: o.partenza,
+    finoM: o.finoM,
+    ar: o.ar,
   }
+}
+
+/** Cosa serve al modulo per la parte fatta: quote dal profilo e anteprima su mappa e profilo. */
+export interface RouteHelpers {
+  pois: Map<string, PoiProps>
+  profile: () => Profile | null // null finché il profilo non è caricato
+  /** Parte fatta (m dall'inizio del sentiero) e punto di arrivo; null = niente anteprima. */
+  preview: (p: { from: number; to: number; at: number } | null) => void
+}
+
+const endName = (t: Trail, which: 'inizio' | 'fine') => {
+  const n = which === 'inizio' ? t.loc_inizio : t.loc_fine
+  return n ? `da ${n}` : which === 'inizio' ? 'dall’inizio' : 'dalla fine'
+}
+
+/** Percorso completo oppure "fin dove sono arrivato" (capo di partenza + punto di arrivo). */
+function routeSection(trail: Trail, L: number, draft: OutingDraft, rh: RouteHelpers): HTMLElement {
+  const box = h('div', { class: 'routebox' })
+  const draw = () => {
+    if (!draft.parziale) {
+      rh.preview(null)
+      box.replaceChildren(mode)
+      return
+    }
+    draft.finoM ??= Math.round(L / 2)
+    const start = segmented<'inizio' | 'fine'>(
+      [
+        ['inizio', endName(trail, 'inizio')],
+        ['fine', endName(trail, 'fine')],
+      ],
+      draft.partenza,
+      (v) => {
+        draft.partenza = v
+        draw()
+      },
+      'small',
+    )
+    const slider = h('input', { type: 'range', min: '0', max: String(Math.round(L)), step: '10', 'aria-label': 'Punto di arrivo lungo il sentiero', class: 'routeslider' }) as HTMLInputElement
+    const kmIn = h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', 'aria-label': 'Km percorsi' }) as HTMLInputElement
+    const readout = h('p', { class: 'mono small routeread' })
+    const update = (from?: 'slider' | 'km') => {
+      const f = Math.max(0, Math.min(L, draft.finoM ?? 0))
+      if (from !== 'slider') slider.value = String(Math.round(f))
+      if (from !== 'km') kmIn.value = it(f / 1000, 1)
+      const at = draft.partenza === 'inizio' ? f : L - f
+      const p = rh.profile()
+      const q = p ? p.q[Math.max(0, Math.min(p.q.length - 1, Math.round(((at / (L || 1)) * p.lung) / p.passo)))] : null
+      readout.textContent = `${it(f / 1000, 1)} km di ${it(L / 1000, 1)}${q != null ? ` · arrivo a ${it(q)} m` : ''}`
+      rh.preview({ from: Math.min(at, draft.partenza === 'inizio' ? 0 : L), to: Math.max(at, draft.partenza === 'inizio' ? 0 : L), at })
+      for (const c of shortcuts.querySelectorAll<HTMLElement>('button')) c.setAttribute('aria-pressed', String(Math.abs(Number(c.dataset.m) - f) < 15))
+    }
+    slider.addEventListener('input', () => {
+      draft.finoM = Number(slider.value)
+      update('slider')
+    })
+    kmIn.addEventListener('input', () => {
+      const v = Number(kmIn.value.trim().replace(',', '.'))
+      if (!kmIn.value.trim() || !Number.isFinite(v)) return
+      draft.finoM = Math.max(0, Math.min(L, v * 1000))
+      update('km')
+    })
+    kmIn.addEventListener('change', () => update())
+    // Scorciatoie: i POI lungo il percorso, in ordine dal capo di partenza.
+    const shortcuts = h('div', { class: 'chipgrid' })
+    const stops = trail.poi
+      .map((x) => ({ info: rh.pois.get(x.id), m: draft.partenza === 'inizio' ? x.km * 1000 : L - x.km * 1000 }))
+      .filter((x) => x.info && x.m > 50 && x.m < L - 20)
+      .sort((x, y) => x.m - y.m)
+    for (const s of stops) {
+      const b = btn('chiptoggle', [h('i', { class: 'dot', style: `background:${CATEGORIES[s.info!.categoria].color}` }), `fino a ${s.info!.nome}`], () => {
+        draft.finoM = Math.round(s.m)
+        update()
+      }, { 'aria-pressed': 'false', 'data-m': String(Math.round(s.m)) })
+      shortcuts.append(b)
+    }
+    box.replaceChildren(
+      mode,
+      h('div', { class: 'field', role: 'group', 'aria-label': 'Capo di partenza' }, h('span', { class: 'field-k' }, 'Partito'), start),
+      h(
+        'div',
+        { class: 'field', role: 'group', 'aria-label': 'Fin dove sono arrivato' },
+        h('span', { class: 'field-k' }, 'Arrivato fino a'),
+        h('div', { class: 'routeslide' }, icon('user', 18), slider),
+        h('div', { class: 'routekm' }, readout, h('label', { class: 'kmfield' }, kmIn, h('span', { class: 'mono small' }, 'km'))),
+        stops.length ? shortcuts : null,
+      ),
+    )
+    update()
+  }
+  const mode = segmented<'completo' | 'parziale'>(
+    [
+      ['completo', 'Percorso completo'],
+      ['parziale', 'Fin dove sono arrivato'],
+    ],
+    draft.parziale ? 'parziale' : 'completo',
+    (v) => {
+      draft.parziale = v === 'parziale'
+      draw()
+    },
+  )
+  draw()
+  return box
 }
 
 /** Riassunto della traccia GPX letta. */
@@ -81,7 +199,8 @@ export function gpxDraft(track: GpxTrack, share: number | null): OutingDraft['gp
   return { km: track.km, dplus: track.dplus, share }
 }
 
-function outingForm(trail: Trail, line: TrailLine | undefined, draft: OutingDraft, friends: Person[], a: OutingActions, done: () => void): HTMLElement {
+function outingForm(trail: Trail, line: TrailLine | undefined, draft: OutingDraft, friends: Person[], a: OutingActions, rh: RouteHelpers, done: () => void): HTMLElement {
+  const L = line?.length ?? trail.lunghezza_m ?? 0
   const form = h('form', { class: 'outingform', 'aria-label': 'Segna come fatto' }) as HTMLFormElement
   form.addEventListener('submit', (e) => e.preventDefault())
 
@@ -134,6 +253,10 @@ function outingForm(trail: Trail, line: TrailLine | undefined, draft: OutingDraf
   comment.addEventListener('input', () => (draft.commento = comment.value))
 
   const drone = switchRow('Avevo il drone', draft.drone, (on) => (draft.drone = on))
+  const route = h('div', {}, routeSection(trail, L, draft, rh))
+  const redrawRoute = () => route.replaceChildren(routeSection(trail, L, draft, rh))
+  const ar = h('div', {}, switchRow('Andata e ritorno', draft.ar, (on) => (draft.ar = on)))
+  const redrawAr = () => ar.replaceChildren(switchRow('Andata e ritorno', draft.ar, (on) => (draft.ar = on)))
 
   // GPX facoltativo: solo km e dislivello reali dell'uscita.
   const gpxBox = h('div', { class: 'gpxbox' })
@@ -164,7 +287,14 @@ function outingForm(trail: Trail, line: TrailLine | undefined, draft: OutingDraf
     if (!f) return
     try {
       const track = parseGpx(await f.text())
-      draft.gpx = gpxDraft(track, line ? matchTrail(track, trail, line).share : null)
+      const m = line ? matchTrail(track, trail, line) : null
+      draft.gpx = gpxDraft(track, m?.share ?? null)
+      // La traccia dice anche quale parte del sentiero si è fatta: la proponiamo.
+      if (m && m.share >= 0.15) {
+        applyRoute(draft, proposeFromGpx(m, track, L))
+        redrawRoute()
+        redrawAr()
+      }
       if (track.date && !draft.id) {
         draft.data = track.date
         date.value = track.date
@@ -194,10 +324,14 @@ function outingForm(trail: Trail, line: TrailLine | undefined, draft: OutingDraf
           drone: draft.drone,
           gpxKm: draft.gpx?.km ?? null,
           gpxDplus: draft.gpx?.dplus ?? null,
+          parziale: draft.parziale,
+          partenza: draft.partenza,
+          finoM: draft.parziale ? Math.round(draft.finoM ?? 0) : null,
+          ar: draft.ar,
         },
         draft.id ?? undefined,
       )
-      a.toast(draft.id ? 'Uscita aggiornata.' : `${trail.numero} segnato come fatto.`)
+      a.toast(draft.id ? 'Uscita aggiornata.' : draft.parziale ? `${trail.numero}: fatti ${it((draft.finoM ?? 0) / 1000, 1)} km.` : `${trail.numero} segnato come fatto.`)
       done()
     }, a)
   })
@@ -205,6 +339,8 @@ function outingForm(trail: Trail, line: TrailLine | undefined, draft: OutingDraf
 
   form.append(
     h('label', { class: 'field' }, h('span', { class: 'field-k' }, 'Data'), date),
+    route,
+    ar,
     h(
       'div',
       { class: 'field', role: 'group', 'aria-label': 'Con chi' },
@@ -235,18 +371,22 @@ export interface MyTrailCtx {
   draft: OutingDraft | null // modulo aperto
   setDraft: (d: OutingDraft | null) => void
   a: OutingActions
+  route: RouteHelpers
 }
 
 export function renderMyTrail(c: MyTrailCtx): HTMLElement {
   const sec = h('div', { class: 'mytrail' })
   const n = c.outings.length
+  const L = c.line?.length ?? c.trail.lunghezza_m ?? 0
+  const cov = coverage(c.outings, L)
   const head = h(
     'div',
     { class: 'section-head' },
     h('p', { class: 'section-label' }, n ? `Le mie uscite · ${n}` : 'Le mie uscite'),
-    n ? h('span', { class: 'pill tiny done' }, icon('check', 14), 'FATTO') : null,
+    n ? (cov.complete ? h('span', { class: 'pill tiny done' }, icon('check', 14), 'FATTO') : h('span', { class: 'pill tiny part' }, icon('half', 14), 'INIZIATO')) : null,
   )
   sec.append(head)
+  if (n && !cov.complete) sec.append(h('p', { class: 'small doneline' }, coverageText(cov.ranges, L)))
   if (!c.logged) {
     sec.append(h('p', { class: 'muted small' }, 'Accedi per segnare i sentieri fatti e scrivere note personali (visibili solo a te).'), btn('btn-outline', ['ACCEDI CON GOOGLE'], c.a.login))
     return sec
@@ -254,7 +394,8 @@ export function renderMyTrail(c: MyTrailCtx): HTMLElement {
   if (n) {
     const list = h('ul', { class: 'outings' })
     for (const o of c.outings) {
-      const meta = [o.con.length ? `con ${o.con.join(', ')}` : null, o.gpxKm != null ? `${it(o.gpxKm, 1)} km${o.gpxDplus != null ? ` · D+ ${it(o.gpxDplus)} m` : ''} (GPX)` : null].filter(Boolean).join(' · ')
+      const part = o.parziale && o.finoM != null ? `${endName(c.trail, o.partenza)}, ${it(o.finoM / 1000, 1)} km` : 'percorso completo'
+      const meta = [part + (o.ar ? ' · andata e ritorno' : ''), o.con.length ? `con ${o.con.join(', ')}` : null, o.gpxKm != null ? `${it(o.gpxKm, 1)} km${o.gpxDplus != null ? ` · D+ ${it(o.gpxDplus)} m` : ''} (GPX)` : null].filter(Boolean).join(' · ')
       list.append(
         h(
           'li',
@@ -277,7 +418,7 @@ export function renderMyTrail(c: MyTrailCtx): HTMLElement {
     }
     sec.append(list)
   }
-  if (c.draft) sec.append(outingForm(c.trail, c.line, c.draft, c.friends, c.a, () => c.setDraft(null)))
+  if (c.draft) sec.append(outingForm(c.trail, c.line, c.draft, c.friends, c.a, c.route, () => c.setDraft(null)))
   else sec.append(btn('btn-outline wide', [icon('check', 18), n ? 'SEGNA UN’ALTRA USCITA' : 'SEGNA COME FATTO'], () => c.setDraft(newDraft())))
 
   // Nota personale: si salva quando si esce dal campo.
@@ -306,6 +447,19 @@ export function renderMyTrail(c: MyTrailCtx): HTMLElement {
   return sec
 }
 
+/** "Fatto fino al km 4,2 di 7,8" (o dalla fine, o in più pezzi). */
+export function coverageText(ranges: [number, number][], L: number): string {
+  const km = (m: number) => it(m / 1000, 1)
+  if (ranges.length === 1) {
+    const [a, b] = ranges[0]
+    if (a <= 1) return `Fatto fino al km ${km(b)} di ${km(L)}`
+    if (b >= L - 1) return `Fatto dal km ${km(a)} alla fine (${km(L)} km)`
+    return `Fatto dal km ${km(a)} al km ${km(b)} di ${km(L)}`
+  }
+  const done = ranges.reduce((s, [a, b]) => s + b - a, 0)
+  return `Fatti ${km(done)} km di ${km(L)}, in ${ranges.length} parti`
+}
+
 // ---------------------------------------------------------------- statistiche
 
 export interface StatsCtx {
@@ -313,6 +467,7 @@ export interface StatsCtx {
   trails: Map<string, Trail>
   pois: Map<string, PoiProps>
   lines: Map<string, TrailLine>
+  profiles: Record<string, Profile> | null // per il dislivello delle parti fatte (null finché si carica)
   nome: string
   onShowMap: (ids: string[]) => void
   onImportGpx: (file: File) => void
@@ -385,16 +540,26 @@ function project(c: [number, number], w: number): [number, number] {
 }
 export const mapSize = (w: number): [number, number] => [w, Math.round(((MAP_BOX[3] - MAP_BOX[1]) / ((MAP_BOX[2] - MAP_BOX[0]) * KX)) * w)]
 
-function pathOf(line: TrailLine, w: number, step: number): string {
-  const pts = line.coords.filter((_, i) => i % step === 0 || i === line.coords.length - 1)
+function pathOf(coords: [number, number][], w: number, step: number): string {
+  const pts = coords.filter((_, i) => i % step === 0 || i === coords.length - 1)
   return pts.map((c, i) => `${i ? 'L' : 'M'}${project(c, w).map((v) => v.toFixed(1)).join(' ')}`).join('')
+}
+
+/** Solo le parti fatte dei sentieri (uscite parziali comprese). */
+function doneParts(s: Stats, lines: Map<string, TrailLine>): [number, number][][] {
+  const out: [number, number][][] = []
+  for (const [id, ranges] of s.parti) {
+    const l = lines.get(id)
+    if (l) for (const [a, b] of ranges) out.push(sliceLine(l, a, b))
+  }
+  return out.filter((c) => c.length > 1)
 }
 
 function personalMap(s: Stats, lines: Map<string, TrailLine>): HTMLElement {
   const W = 600
   const [, H] = mapSize(W)
-  basePath ??= [...lines.values()].map((l) => pathOf(l, W, 6)).join('')
-  const done = [...s.fatti].map((id) => lines.get(id)).filter((l): l is TrailLine => !!l).map((l) => pathOf(l, W, 2)).join('')
+  basePath ??= [...lines.values()].map((l) => pathOf(l.coords, W, 6)).join('')
+  const done = doneParts(s, lines).map((c) => pathOf(c, W, 1)).join('')
   const ns = 'http://www.w3.org/2000/svg'
   const svg = document.createElementNS(ns, 'svg')
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`)
@@ -414,7 +579,7 @@ function personalMap(s: Stats, lines: Map<string, TrailLine>): HTMLElement {
 export function renderStats(c: StatsCtx, rerender: () => void): HTMLElement {
   const years = yearsOf(c.outings)
   if (statsYear != null && !years.includes(statsYear)) statsYear = years[0]
-  const s = computeStats(c.outings, statsYear, c.trails, c.pois)
+  const s = computeStats(c.outings, statsYear, c.trails, c.pois, c.lines, c.profiles)
   const sec = h('section', { class: 'stats' })
   const sel = h('select', { 'aria-label': 'Anno delle statistiche' }, ...years.map((y) => h('option', { value: String(y) }, String(y))), h('option', { value: '' }, 'Tutti gli anni')) as HTMLSelectElement
   sel.value = statsYear == null ? '' : String(statsYear)
@@ -447,7 +612,9 @@ export function renderStats(c: StatsCtx, rerender: () => void): HTMLElement {
       { class: 'tiles statstiles' },
       tile('KM', it(s.km, 1)),
       tile('D+', `${it(s.dplus)} m`),
-      tile('USCITE', String(s.uscite), `${s.sentieri} sentieri diversi`),
+      tile('USCITE', String(s.uscite), `${s.sentieri} ${s.sentieri === 1 ? 'sentiero' : 'sentieri diversi'}`),
+      tile('COMPLETATI', String(s.completati), 'sentieri fatti tutti'),
+      tile('INIZIATI', String(s.iniziati), 'non ancora finiti'),
       tile('COL DRONE', String(s.conDrone), s.uscite ? `${Math.round((s.conDrone / s.uscite) * 100)}% delle uscite` : undefined),
     ),
   )
@@ -577,10 +744,10 @@ async function exportStats(s: Stats, c: StatsCtx): Promise<void> {
   g.translate((W - mw) / 2, y)
   g.lineCap = 'round'
   g.lineJoin = 'round'
-  const drawLine = (l: TrailLine, step: number) => {
+  const drawLine = (coords: [number, number][], step: number) => {
     g.beginPath()
-    l.coords.forEach((pt, i) => {
-      if (i % step && i !== l.coords.length - 1) return
+    coords.forEach((pt, i) => {
+      if (i % step && i !== coords.length - 1) return
       const [px, py] = project(pt, mw)
       if (i) g.lineTo(px, py)
       else g.moveTo(px, py)
@@ -589,13 +756,10 @@ async function exportStats(s: Stats, c: StatsCtx): Promise<void> {
   }
   g.strokeStyle = 'rgba(20,32,36,0.16)'
   g.lineWidth = 1.2
-  for (const l of c.lines.values()) drawLine(l, 4)
+  for (const l of c.lines.values()) drawLine(l.coords, 4)
   g.strokeStyle = accent
   g.lineWidth = 4
-  for (const id of s.fatti) {
-    const l = c.lines.get(id)
-    if (l) drawLine(l, 1)
-  }
+  for (const part of doneParts(s, c.lines)) drawLine(part, 1)
   g.restore()
   g.fillStyle = muted
   g.font = `500 20px ${mono}`

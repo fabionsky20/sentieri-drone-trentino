@@ -6,7 +6,8 @@ import type { PoiCategory, Trail } from './types'
 
 export type Volo = 'qualsiasi' | 'verde' | 'tutto'
 export type Salvati = '' | 'miei' | 'condivisi' | 'entrambi'
-export type Fatti = '' | 'no' | 'si' // '' = tutti, 'no' = non ancora fatti, 'si' = solo fatti
+// '' = tutti, 'no' = mai fatti, 'iniziati' = iniziati ma non finiti, 'si' = completati
+export type Fatti = '' | 'no' | 'iniziati' | 'si'
 export type KmByColor = { verde: number; giallo: number; rosso: number }
 
 export interface FilterState {
@@ -65,7 +66,8 @@ export interface TrailContext {
   closed: boolean
   mine: boolean // nei miei salvati
   shared: boolean // nella lista condivisa
-  done: boolean // l'ho già fatto (almeno un'uscita)
+  done: boolean // completato (le uscite coprono tutto il sentiero)
+  started: boolean // iniziato ma non finito
 }
 
 export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
@@ -74,7 +76,8 @@ export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
   if (f.salvati === 'miei' && !ctx.mine) return false
   if (f.salvati === 'condivisi' && !ctx.shared) return false
   if (f.salvati === 'entrambi' && !ctx.mine && !ctx.shared) return false
-  if (f.fatti === 'no' && ctx.done) return false
+  if (f.fatti === 'no' && (ctx.done || ctx.started)) return false
+  if (f.fatti === 'iniziati' && !ctx.started) return false
   if (f.fatti === 'si' && !ctx.done) return false
   if (f.volo === 'verde' && km.verde < f.verdeKm) return false
   if (f.volo === 'tutto' && km.rosso > 0.005) return false
@@ -265,6 +268,7 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     [
       ['', 'Tutti'],
       ['no', 'Non ancora fatti'],
+      ['iniziati', 'Iniziati ma non finiti'],
       ['si', 'Solo fatti'],
     ],
     f.fatti,

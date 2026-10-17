@@ -12,15 +12,15 @@ import { effective, isActive, today, type Effective } from './flight'
 import { CATEGORIES, CATEGORY_ORDER, registerIcons } from './icons'
 import { catIcon, dotDate, formatDate, h, renderPoi, renderTrail, renderZones, trailCard } from './panel'
 import { photosSection } from './photos'
-import { renderProfile } from './profile'
+import { renderProfile, type ProfileEl } from './profile'
 import type { AccountState } from './account'
 import type { BoardsState } from './boards'
 import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, type BoardsActions, type TrailInfo } from './boardsui'
-import { gpxDraft, newDraft, renderMyTrail, renderStats, type OutingActions, type OutingDraft, type Person } from './outingsui'
-import { nearestTrail, parseGpx, type GpxTrack } from './outings'
+import { applyRoute, gpxDraft, newDraft, renderMyTrail, renderStats, type OutingActions, type OutingDraft, type Person } from './outingsui'
+import { coverage, nearestTrail, parseGpx, proposeFromGpx, type GpxTrack, type Outing } from './outings'
 import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, renderWelcomeInvite, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
-import { buildTrailLines, pointAt } from './trailgeom'
+import { buildTrailLines, pointAt, sliceLine } from './trailgeom'
 import type {
   Colore,
   FC,
@@ -127,7 +127,11 @@ map.once('idle', () => document.querySelector('.maplibregl-ctrl-attrib')?.classL
 
 // Profili e indice di ricerca servono solo quando si aprono: caricati alla prima richiesta.
 let profilesP: Promise<Record<string, Profile>> | null = null
-const getProfiles = () => (profilesP ??= load<Record<string, Profile>>('profiles.json'))
+const getProfiles = () =>
+  (profilesP ??= load<Record<string, Profile>>('profiles.json').then((d) => {
+    profilesData = d
+    return d
+  }))
 let searchP: Promise<SearchItem[]> | null = null
 const getSearch = () => (searchP ??= load<SearchItem[]>('search.json'))
 
@@ -321,20 +325,34 @@ map.addLayer(
   },
   FIRST_LABEL,
 )
-// Sentieri già fatti: un puntinato scuro sopra il colore (si spegne dai filtri).
+// Parti fatte dei sentieri (anche solo fin dove si è arrivati): puntinato scuro sopra il colore.
+// La geometria si ritaglia nel browser dalle uscite; si spegne dai filtri.
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
+map.addSource('done-parts', { type: 'geojson', data: EMPTY_FC })
 map.addLayer(
   {
     id: 'seg-done',
     type: 'line',
-    source: 'segments',
-    filter: ['in', ['get', 'sentiero_id'], ['literal', []]],
+    source: 'done-parts',
     layout: round,
     paint: {
       'line-color': '#142024',
-      'line-opacity': dimmed(0.85, 0.15),
+      'line-opacity': ['case', ['boolean', ['get', 'off'], false], 0.15, 0.85] as unknown as number,
       'line-width': byZoom(8, 0.8, 12, 1.4, 16, 2.4),
       'line-dasharray': [0.1, 2.4],
     },
+  },
+  FIRST_LABEL,
+)
+// Anteprima nel modulo "Fin dove sono arrivato": la parte scelta, in evidenza.
+map.addSource('walk-preview', { type: 'geojson', data: EMPTY_FC })
+map.addLayer(
+  {
+    id: 'walk-preview',
+    type: 'line',
+    source: 'walk-preview',
+    layout: round,
+    paint: { 'line-color': ACCENT, 'line-opacity': 0.85, 'line-width': byZoom(8, 3, 12, 5, 16, 8) },
   },
   FIRST_LABEL,
 )
@@ -692,6 +710,11 @@ const sheet = $('sheet')
 const body = $('panel-body')
 const foot = $('panel-foot')
 const hoverMarker = new maplibregl.Marker({ element: h('div', { class: 'hover-dot' }) })
+// Segnaposto "fin dove sono arrivato" (mappa e profilo) e profili già scaricati.
+const walkMarker = new maplibregl.Marker({ element: h('div', { class: 'walk-pin', title: 'Punto di arrivo' }, icon('walk', 18)) })
+let currentProfile: { trailId: string; el: ProfileEl } | null = null
+let walkPending: { from: number; to: number; at: number } | null = null
+let profilesData: Record<string, Profile> | null = null // profili già scaricati (getProfiles)
 
 /** Dove vive la scheda: telefono → in cima alla pagina (copre barra in alto e navigazione);
  *  tablet/PC → nel pannello sinistro, sopra i filtri. */
@@ -716,17 +739,18 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
         profileBox.replaceChildren(h('p', { class: 'muted small' }, 'Profilo non disponibile.'))
         return
       }
-      profileBox.replaceChildren(
-        renderProfile({
-          profile,
-          ranges: line.segs.map((s) => ({ from: s.from, to: s.to, color: COLORS[eff.get(s.id)?.colore ?? 'verde'] })),
-          pois: trail.poi.flatMap((p) => (pois.has(p.id) ? [{ km: p.km, cat: pois.get(p.id)!.categoria }] : [])),
-          onHover: (m) => {
-            if (m == null) hoverMarker.remove()
-            else hoverMarker.setLngLat(pointAt(line, m)).addTo(map)
-          },
-        }),
-      )
+      const el = renderProfile({
+        profile,
+        ranges: line.segs.map((s) => ({ from: s.from, to: s.to, color: COLORS[eff.get(s.id)?.colore ?? 'verde'] })),
+        pois: trail.poi.flatMap((p) => (pois.has(p.id) ? [{ km: p.km, cat: pois.get(p.id)!.categoria }] : [])),
+        onHover: (m) => {
+          if (m == null) hoverMarker.remove()
+          else hoverMarker.setLngLat(pointAt(line, m)).addTo(map)
+        },
+      })
+      profileBox.replaceChildren(el)
+      currentProfile = { trailId: trail.id, el }
+      if (walkPending) setWalkPreview(trail.id, walkPending)
     })
     .catch(() => profileBox.replaceChildren(h('p', { class: 'muted small' }, 'Profilo non disponibile.')))
 
@@ -759,6 +783,8 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
 
 function render(): void {
   hoverMarker.remove()
+  setWalkPreview('', null)
+  currentProfile = null
   const trailId = selection?.kind === 'trail' ? selection.id : ''
   map.setFilter('seg-sel', ['==', ['get', 'sentiero_id'], trailId])
   map.setFilter('zone-sel', ['in', ['get', 'zona_id'], ['literal', selection?.kind === 'zones' ? selection.ids : []]])
@@ -877,6 +903,7 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
     closed: closedIds.has(t.id),
     saved: !!acct?.miei.has(t.id) || inBoards(t.id),
     done: doneSet.has(t.id),
+    started: startedSet.has(t.id),
     ...extra,
     onOpen: () => {
       select({ kind: 'trail', id: t.id })
@@ -886,8 +913,9 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
 }
 
 function applyFilters(): void {
-  doneSet = new Set(acct?.status === 'pronto' ? acct.uscite.map((o) => o.sentiero) : [])
-  map.setFilter('seg-done', ['in', ['get', 'sentiero_id'], ['literal', filters.segnaFatti ? [...doneSet] : []]])
+  const cov = doneCoverage()
+  doneSet = new Set([...cov].filter(([, c]) => c.complete).map(([id]) => id))
+  startedSet = new Set([...cov].filter(([, c]) => !c.complete).map(([id]) => id))
   const active = activeCount(filters)
   const ok = new Set<string>()
   const results: Trail[] = []
@@ -898,6 +926,7 @@ function applyFilters(): void {
       mine: acct?.miei.has(t.id) ?? false,
       shared: inBoards(t.id),
       done: doneSet.has(t.id),
+      started: startedSet.has(t.id),
     }
     if (matches(t, ctx, filters)) {
       ok.add(t.id)
@@ -907,6 +936,7 @@ function applyFilters(): void {
   for (const f of segments.features) {
     map.setFeatureState({ source: 'segments', id: f.properties.id }, { off: active > 0 && !ok.has(f.properties.sentiero_id) })
   }
+  drawDoneParts(cov, (id) => active > 0 && !ok.has(id))
 
   for (const id of ['filter-count', 'tab-count']) {
     $(id).hidden = active === 0
@@ -1071,7 +1101,8 @@ let accountModule: Promise<typeof import('./account')> | null = null
 let currentSave: { trailId: string; box: HTMLElement } | null = null
 let currentMine: { trailId: string; box: HTMLElement } | null = null
 let outingDraft: { trailId: string; draft: OutingDraft } | null = null
-let doneSet = new Set<string>() // sentieri con almeno un'uscita
+let doneSet = new Set<string>() // sentieri completati (le uscite li coprono tutti)
+let startedSet = new Set<string>() // iniziati ma non finiti
 type SavedTab = 'miei' | 'bacheche'
 let savedTab: SavedTab = 'miei'
 let currentBoard: string | null = null
@@ -1168,7 +1199,7 @@ const accountActions = (): ProfileActions => ({
   toast: showToast,
   statsSection: () =>
     renderStats(
-      { outings: acct?.uscite ?? [], trails, pois, lines: trailLines, nome: acct?.profile?.nome ?? '', onShowMap: showDoneOnMap, onImportGpx: (f) => void importGpx(f), toast: showToast },
+      { outings: acct?.uscite ?? [], trails, pois, lines: trailLines, profiles: profilesData ?? (getProfiles().then(() => renderProfileView()), null), nome: acct?.profile?.nome ?? '', onShowMap: showDoneOnMap, onImportGpx: (f) => void importGpx(f), toast: showToast },
       () => renderProfileView(true),
     ),
   zoneSuggestions: [...gruppi, ...valleysFC.features.filter((f) => f.properties.principale).map((f) => f.properties.nome)].sort((a, b) =>
@@ -1261,14 +1292,67 @@ function renderMyTrailBox(force = false): void {
       note: logged ? (acct!.note.get(trailId) ?? null) : null,
       friends: logged ? appFriends() : [],
       draft: outingDraft?.draft ?? null,
+      route: {
+        pois,
+        profile: () => profilesData?.[trailId] ?? null,
+        preview: (p) => setWalkPreview(trailId, p),
+      },
       setDraft: (d) => {
         outingDraft = d ? { trailId, draft: d } : null
+        if (!d) setWalkPreview(trailId, null)
         renderMyTrailBox(true)
         if (d) box.querySelector('.outingform')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       },
       a: outingActions(),
     }),
   )
+}
+
+/** Parte fatta di ogni sentiero toccato dalle mie uscite. */
+function doneCoverage(): Map<string, ReturnType<typeof coverage>> {
+  const out = new Map<string, ReturnType<typeof coverage>>()
+  if (acct?.status !== 'pronto') return out
+  const by = new Map<string, Outing[]>()
+  for (const o of acct.uscite) if (trails.has(o.sentiero)) by.set(o.sentiero, [...(by.get(o.sentiero) ?? []), o])
+  for (const [id, list] of by) out.set(id, coverage(list, trailLines.get(id)?.length ?? trails.get(id)!.lunghezza_m ?? 0))
+  return out
+}
+
+function drawDoneParts(cov: Map<string, ReturnType<typeof coverage>>, off: (id: string) => boolean): void {
+  const features: GeoJSON.Feature[] = []
+  if (filters.segnaFatti) {
+    for (const [id, c] of cov) {
+      const line = trailLines.get(id)
+      if (!line) continue
+      for (const [a, b] of c.ranges) {
+        const coords = sliceLine(line, a, b)
+        if (coords.length > 1) features.push({ type: 'Feature', properties: { id, off: off(id) }, geometry: { type: 'LineString', coordinates: coords } })
+      }
+    }
+  }
+  ;(map.getSource('done-parts') as maplibregl.GeoJSONSource).setData({ type: 'FeatureCollection', features })
+}
+
+/** Anteprima di "fin dove sono arrivato": parte scelta sulla mappa, omino all'arrivo, e lo
+ *  stesso sul profilo altimetrico (m dall'inizio del sentiero). */
+function setWalkPreview(trailId: string, p: { from: number; to: number; at: number } | null): void {
+  walkPending = p
+  const line = trailLines.get(trailId)
+  const src = map.getSource('walk-preview') as maplibregl.GeoJSONSource | undefined
+  if (!p || !line) {
+    walkMarker.remove()
+    src?.setData(EMPTY_FC)
+    if (currentProfile?.trailId === trailId || !p) currentProfile?.el.setPin(null)
+    return
+  }
+  const coords = sliceLine(line, p.from, p.to)
+  src?.setData(coords.length > 1 ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } } : EMPTY_FC)
+  walkMarker.setLngLat(pointAt(line, p.at)).addTo(map)
+  const prof = profilesData?.[trailId]
+  if (currentProfile?.trailId === trailId && prof) {
+    const r = prof.lung / (line.length || 1)
+    currentProfile.el.setPin({ from: p.from * r, to: p.to * r, at: p.at * r })
+  }
 }
 
 /** Statistiche → "Mostra sulla mappa": filtro "Solo fatti" e zoom sui sentieri fatti. */
@@ -1302,6 +1386,7 @@ async function importGpx(file: File): Promise<void> {
   }
   const t = best.trail
   const draft = newDraft({ gpx: gpxDraft(track, best.share) })
+  applyRoute(draft, proposeFromGpx(best, track, trailLines.get(t.id)?.length ?? t.lunghezza_m ?? 0))
   if (track.date) draft.data = track.date
   outingDraft = { trailId: t.id, draft }
   if (mobile()) setTab('map')

@@ -3040,3 +3040,105 @@ button:disabled {
 .form-actions.wrap {
   flex-wrap: wrap;
 }
+
+/* ---- uscite parziali: "fin dove sono arrivato" ---- */
+
+.routebox {
+  display: grid;
+  gap: 10px;
+}
+
+.routebox .field {
+  margin: 0;
+}
+
+.routeslide {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.routeslider {
+  flex: 1;
+  min-height: 44px;
+  accent-color: var(--accent);
+}
+
+.routekm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.routeread {
+  margin: 0;
+}
+
+.kmfield {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kmfield input {
+  width: 84px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  background: var(--panel);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.pill.part {
+  gap: 4px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.doneline {
+  margin: 0;
+  font-weight: 500;
+}
+
+.profile-walked {
+  position: absolute;
+  background: rgb(11 110 132 / 0.14);
+  pointer-events: none;
+}
+
+.profile-pin {
+  position: absolute;
+  width: 0;
+  border-left: 2px solid var(--ink);
+  pointer-events: none;
+}
+
+.profile-pin::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: -7px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid #fff;
+}
+
+.walk-pin {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 0.45);
+}

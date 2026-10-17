@@ -276,6 +276,10 @@ async function start(user: User): Promise<void> {
               drone: !!d.get('drone'),
               gpxKm: d.get('gpx_km') ?? null,
               gpxDplus: d.get('gpx_dplus') ?? null,
+              parziale: d.get('parziale') === true,
+              partenza: d.get('partenza') === 'fine' ? ('fine' as const) : ('inizio' as const),
+              finoM: d.get('fino_m') ?? null,
+              ar: d.get('ar') === true,
             }))
             .sort((a, b) => b.data.localeCompare(a.data)),
         }),
@@ -423,6 +427,11 @@ export async function saveOuting(o: OutingInput, id?: string): Promise<void> {
     drone: o.drone,
     gpx_km: o.gpxKm == null ? null : Math.round(o.gpxKm * 100) / 100,
     gpx_dplus: o.gpxDplus == null ? null : Math.round(o.gpxDplus),
+    // Parziale: capo di partenza e metri fatti; completa: i campi restano vuoti.
+    parziale: o.parziale,
+    partenza: o.parziale ? o.partenza : null,
+    fino_m: o.parziale && o.finoM != null ? Math.round(o.finoM) : null,
+    ar: o.ar,
     ...(id ? {} : { creato: serverTimestamp() }),
     aggiornato: serverTimestamp(),
   }, { merge: !!id })

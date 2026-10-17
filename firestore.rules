@@ -264,7 +264,16 @@ service cloud.firestore {
     function validOuting(d) {
       return d.keys().hasAll(['sentiero', 'data', 'con', 'conUid', 'drone', 'creato', 'aggiornato'])
         && d.keys().hasOnly(['sentiero', 'data', 'con', 'conUid', 'commento', 'drone',
-                             'gpx_km', 'gpx_dplus', 'creato', 'aggiornato'])
+                             'gpx_km', 'gpx_dplus', 'parziale', 'partenza', 'fino_m', 'ar',
+                             'creato', 'aggiornato'])
+        // Uscita parziale ("fin dove sono arrivato"): capo di partenza e metri fatti da lì.
+        // Senza questi campi (uscite già salvate) l'uscita è completa, solo andata.
+        && d.get('parziale', false) is bool
+        && d.get('ar', false) is bool
+        && (d.get('partenza', null) == null || d.partenza in ['inizio', 'fine'])
+        && (d.get('fino_m', null) == null || (d.fino_m is int && d.fino_m >= 0 && d.fino_m <= 200000))
+        && (d.get('parziale', false) == false
+            || (d.get('partenza', null) != null && d.get('fino_m', null) != null))
         && validTrail(d.sentiero)
         && outingDate(d.data)
         && d.con is list && d.con.size() <= 20
