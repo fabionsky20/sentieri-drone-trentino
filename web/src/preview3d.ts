@@ -78,6 +78,35 @@ const SPEEDS: [string, number][] = [
 
 let active: (() => void) | null = null
 
+// ---------------------------------------------------------------- colori: satellite o copertura del suolo
+
+/** EOX Sentinel-2 cloudless (WMTS, ordine {z}/{y}/{x}): licenza CC BY-NC-SA 4.0, va bene per
+ *  l'uso non commerciale. Risoluzione 10 m: oltre z14 si ingrandisce. */
+const SAT = 'fly-sat'
+const SAT_URL = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2024_3857/default/g/{z}/{y}/{x}.jpg'
+export const SAT_CREDIT = 'Immagini: Sentinel-2 cloudless 2024 di EOX IT Services (dati Copernicus Sentinel modificati), CC BY-NC-SA 4.0'
+const SAT_ATTR = '<a href="https://s2maps.eu" target="_blank" rel="noopener">Sentinel-2 cloudless – s2maps.eu</a> di EOX IT Services GmbH (dati Copernicus Sentinel 2024 modificati), CC BY-NC-SA 4.0'
+
+/** Ripiego senza satellite: colori della copertura del suolo di OpenFreeMap (non il bianco). */
+const LANDCOVER_COLORS: [string, string, unknown][] = [
+  ['bg', 'background-color', '#A9B88E'], // prati e pascoli d'alta quota (dove non c'è altro)
+  ['landcover-wood', 'fill-color', '#5E7F4E'],
+  ['landcover-wood', 'fill-opacity', 1],
+  ['landcover-grass', 'fill-color', '#9DB57A'],
+  ['landcover-grass', 'fill-opacity', 1],
+  ['landcover-rock', 'fill-color', '#ABA59A'],
+  ['landcover-rock', 'fill-opacity', 1],
+  ['landcover-ice', 'fill-color', '#EEF3F5'],
+  ['water', 'fill-color', '#4F8FB3'],
+]
+
+/** Ombreggiatura sopra i colori: solo ombre (le luci trasparenti non "sbiancano" le montagne). */
+const SHADE_PAINT: [string, unknown][] = [
+  ['hillshade-highlight-color', 'rgba(255,255,255,0)'],
+  ['hillshade-accent-color', 'rgba(0,0,0,0)'],
+  ['hillshade-shadow-color', 'rgba(18,26,22,0.45)'],
+]
+
 // ---------------------------------------------------------------- quota del terreno dal DEM
 
 const DEM_URL = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp'
@@ -183,6 +212,33 @@ export function startPreview(o: PreviewOptions): () => void {
   if (o.mobile) map.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25))
   if (!map.getSource(TERRAIN_3D)) map.addSource(TERRAIN_3D, TERRAIN_3D_SOURCE)
   map.setTerrain({ source: TERRAIN_3D, exaggeration: 1 })
+
+  // Colori reali: satellite sotto l'ombreggiatura (sentiero, zone e acqua restano sopra).
+  const saved: [string, string, unknown][] = []
+  const paint = (id: string, prop: string, value: unknown) => {
+    if (!map.getLayer(id)) return
+    saved.push([id, prop, map.getPaintProperty(id, prop as never)])
+    map.setPaintProperty(id, prop as never, value as never)
+  }
+  if (!map.getSource(SAT)) map.addSource(SAT, { type: 'raster', tiles: [SAT_URL], tileSize: 256, maxzoom: 14, attribution: SAT_ATTR })
+  if (!map.getLayer(SAT)) map.addLayer({ id: SAT, type: 'raster', source: SAT, paint: { 'raster-fade-duration': 0, 'raster-brightness-min': 0.1, 'raster-contrast': 0.05, 'raster-saturation': 0.12 } }, map.getLayer('hillshade') ? 'hillshade' : undefined)
+  for (const [prop, v] of SHADE_PAINT) paint('hillshade', prop, v)
+  paint('water', 'fill-opacity', 0.35) // i laghi si vedono già nel satellite
+  let satFallback = false
+  let satErrors = 0
+  /** Satellite non disponibile: si passa ai colori della copertura del suolo. */
+  const fallbackColors = () => {
+    if (satFallback) return
+    satFallback = true
+    if (map.getLayer(SAT)) map.setLayoutProperty(SAT, 'visibility', 'none')
+    for (const [id, prop, v] of LANDCOVER_COLORS) paint(id, prop, v)
+    paint('water', 'fill-opacity', 1)
+    credit.textContent = 'Satellite non disponibile: colori della copertura del suolo (OpenStreetMap). Terreno © Mapterhorn.'
+  }
+  const onError = (e: unknown) => {
+    if ((e as { sourceId?: string }).sourceId === SAT && ++satErrors >= 3) fallbackColors()
+  }
+  map.on('error', onError)
   for (const hd of [map.dragPan, map.dragRotate, map.scrollZoom, map.touchZoomRotate, map.doubleClickZoom, map.keyboard, map.touchPitch, map.boxZoom]) hd.disable()
   document.body.classList.add('fly3d')
 
@@ -215,18 +271,19 @@ export function startPreview(o: PreviewOptions): () => void {
       map.setPaintProperty('hillshade', 'hillshade-illumination-anchor', 'map')
       map.setPaintProperty('hillshade', 'hillshade-illumination-direction', Math.round(sp.azimuth) % 360)
       map.setPaintProperty('hillshade', 'hillshade-illumination-altitude', clamp(alt, 2, 90))
-      map.setPaintProperty('hillshade', 'hillshade-exaggeration', alt < 15 ? 0.75 : 0.55)
+      map.setPaintProperty('hillshade', 'hillshade-exaggeration', alt < 15 ? 0.6 : 0.4)
     }
     const night = alt < -6
     const golden = alt >= -6 && alt < 8
     map.setSky({
       'sky-color': night ? '#0b1a2e' : golden ? '#f2b27a' : '#7fb6e0',
       'horizon-color': night ? '#1d2c44' : golden ? '#f7d9b0' : '#dcebf5',
-      'fog-color': night ? '#1d2c44' : '#e8eef0',
-      'sky-horizon-blend': 0.6,
-      'horizon-fog-blend': 0.6,
-      'fog-ground-blend': 0.85,
-      'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 12, 0.4],
+      // Foschia: comincia a metà distanza e sfuma l'orizzonte, per dare profondità.
+      'fog-color': night ? '#1d2c44' : golden ? '#efd9c0' : '#d4e1ea',
+      'sky-horizon-blend': 0.5,
+      'horizon-fog-blend': 0.7,
+      'fog-ground-blend': 0.55,
+      'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 12, 0.5],
     })
     // Prima dell'alba e dopo il tramonto: velo scuro sulla scena.
     shade.style.opacity = String(night ? 0.55 : alt < 0 ? 0.3 : 0)
@@ -240,6 +297,7 @@ export function startPreview(o: PreviewOptions): () => void {
   const exit = h('button', { type: 'button', class: 'btn-primary fly-exit' }, icon('close', 18), 'ESCI')
   const readout = h('p', { class: 'mono small fly-read' })
   const sunOut = h('p', { class: 'mono small fly-sun' })
+  const credit = h('p', { class: 'small muted fly-credit' }, `${SAT_CREDIT}. Terreno © Mapterhorn.`)
 
   const slider = (label: string, min: number, max: number, step: number, value: number, fmt: (v: number) => string, onInput: (v: number) => void) => {
     const input = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), 'aria-label': label }) as HTMLInputElement
@@ -329,6 +387,7 @@ export function startPreview(o: PreviewOptions): () => void {
     h('p', { class: 'mono small muted' }, `Alba ${hhmm(times.sunrise)} · Tramonto ${hhmm(times.sunset)}`),
     h('div', { class: 'fly-row' }, shot),
     h('p', { class: 'hint' }, 'Trascina sulla scena per guardare in giro. Sentiero e zone D-Flight attive nella data scelta sono disegnati sul terreno.'),
+    credit,
   )
   const root = h('div', { class: 'fly' }, shade, panel)
   document.body.append(root)
@@ -417,6 +476,9 @@ export function startPreview(o: PreviewOptions): () => void {
       const s = c.width / src.clientWidth
       const pad = 14 * s
       const lines = [`QUOTA 120 · ${o.name}`, `${o.trail} · ${height} m sul terreno · ${o.day.split('-').reverse().join('.')} ${lSlider.out.textContent}`]
+      g.font = `500 ${10 * s}px "IBM Plex Sans", sans-serif`
+      g.fillStyle = 'rgba(255,255,255,0.85)'
+      g.fillText(satFallback ? 'Terreno © Mapterhorn · © OpenStreetMap' : `Sentinel-2 cloudless 2024 by EOX (CC BY-NC-SA 4.0) · Terreno © Mapterhorn`, pad * 2, c.height - pad - 4 * s)
       g.font = `600 ${16 * s}px "IBM Plex Sans Condensed", sans-serif`
       const w = Math.max(...lines.map((l) => g.measureText(l).width)) + pad * 2
       g.fillStyle = 'rgba(20,32,36,0.72)'
@@ -454,6 +516,10 @@ export function startPreview(o: PreviewOptions): () => void {
     window.removeEventListener('resize', onResize)
     root.remove()
     document.body.classList.remove('fly3d')
+    map.off('error', onError)
+    for (const [id, prop, v] of saved.reverse()) if (map.getLayer(id)) map.setPaintProperty(id, prop as never, v as never)
+    if (map.getLayer(SAT)) map.removeLayer(SAT)
+    if (map.getSource(SAT)) map.removeSource(SAT)
     map.setTerrain(null)
     if (map.getSource(TERRAIN_3D)) map.removeSource(TERRAIN_3D)
     map.setCenterClampedToGround(before.clamped)
