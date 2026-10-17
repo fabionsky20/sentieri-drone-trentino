@@ -77,3 +77,29 @@ export function sliceLine(line: TrailLine, from: number, to: number): [number, n
   out.push(pointAt(line, to))
   return out
 }
+
+/** Punto del sentiero più vicino a `p`: metri dall'inizio (scala della pipeline), distanza (m)
+ *  e coordinate del punto agganciato alla linea. */
+export function projectOnLine(line: TrailLine, p: [number, number]): { along: number; d: number; at: [number, number] } {
+  const c = line.coords
+  const kx = 111_320 * Math.cos((p[1] * Math.PI) / 180)
+  const ky = 110_540
+  let best = Infinity
+  let along = 0
+  let at: [number, number] = c[0]
+  for (let i = 1; i < c.length; i++) {
+    const ax = c[i - 1][0] * kx
+    const ay = c[i - 1][1] * ky
+    const dx = c[i][0] * kx - ax
+    const dy = c[i][1] * ky - ay
+    const t = dx || dy ? Math.max(0, Math.min(1, ((p[0] * kx - ax) * dx + (p[1] * ky - ay) * dy) / (dx * dx + dy * dy))) : 0
+    const d = Math.hypot(p[0] * kx - (ax + t * dx), p[1] * ky - (ay + t * dy))
+    if (d < best) {
+      best = d
+      along = line.cum[i - 1] + t * (line.cum[i] - line.cum[i - 1])
+      at = [c[i - 1][0] + (c[i][0] - c[i - 1][0]) * t, c[i - 1][1] + (c[i][1] - c[i - 1][1]) * t]
+    }
+  }
+  const total = line.cum[line.cum.length - 1] || 1
+  return { along: (along / total) * line.length, d: best, at }
+}

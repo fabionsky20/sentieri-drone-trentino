@@ -11,7 +11,7 @@ Questo file è il riferimento per tutte le fasi. Dettagli sui dati reali: [docs/
 
 - **Uso attuale privato** (gruppo di ~10 amici), **costo zero**: GitHub Pages + Firebase Spark. Niente di commerciale (no ads, no pagamenti) finché non ci saranno permessi da D-Flight.
 - **Fase 1 Fondamenta:** A login aperto + profilo + hangar ✅ → B bacheche condivise con inviti ✅ → C note sui sentieri, "segna come fatto", statistiche ✅ → D meteo e indice di volabilità ✅.
-- **Fase 2 Beta:** PWA offline, notifiche push, anteprima di volo 3D (camera a 120 m che ruota a 360°), ostacoli da OSM (cavi, linee elettriche, elisuperfici), segnalazioni con scadenza, Android in test chiuso.
+- **Fase 2 Beta:** PWA offline, notifiche push, anteprima di volo 3D ✅, ostacoli da OSM (cavi, linee elettriche, elisuperfici), segnalazioni con scadenza, Android in test chiuso.
 - **Dopo:** luce/ora d'oro, mare di nubi, "cosa vedo da qui", punti di decollo, badge, card Instagram, lista inquadrature.
 - **REGOLA FISSA: l'app non registra, chiede o mostra MAI la quota a cui l'utente ha volato, né importa log di volo. Nessuna statistica di quota volata.** Si mostrano solo i limiti dello spazio aereo.
 - **Privacy:** storico e statistiche privati di default; ogni utente legge solo i propri dati.
@@ -168,6 +168,13 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
 - `web/src/weatherui.ts`: sezione "Meteo e volabilità" nella scheda (`TrailView.weather`), striscia oraria cliccabile, tabella per ora (temperatura, pioggia, vento 10/80/120 m, raffiche, nuvole basse, visibilità, Kp), alba/tramonto, scelta del drone (hangar + generici, ricordata in localStorage `drone-meteo`); bollino `volChip` nelle card.
 - In `main.ts`: `refreshWeather` (debounce su giorno, filtri, spostamento mappa, sentiero aperto) calcola solo per il sentiero aperto + primi `LISTA_METEO` risultati + sentieri nella zona della mappa, fino a `MAX_SENTIERI`. Punto più alto e centrale dai profili altimetrici (`profiles.json`). Filtro `volMin`, ordinamento `ordina`, mappa per volabilità `coloraVol` (feature-state `vol` per tratto, legenda che cambia).
 - Prove: le prove che non riguardano il meteo intercettano Open-Meteo/NOAA con risposte finte (non consumano la quota gratuita: 10.000 punti al giorno, limite al minuto).
+
+## Anteprima di volo 3D (Roadmap Fase 2)
+
+- `web/src/preview3d.ts` (`startPreview`): riusa la mappa principale (niente secondo contesto WebGL) con `setTerrain` sulla sorgente `terrain` (Mapterhorn) e `setSky`; camera piazzata con `calculateCameraOptionsFromCameraLngLatAltRotation` a quota terreno (max tra profilo e `queryTerrainElevation`) + 20–120 m; campo visivo verticale da ~80° orizzontali (`setVerticalFieldOfView`); `maxPitch` 85, `maxZoom` 22 durante l'anteprima. Interazioni della mappa disattivate: il trascinamento cambia solo direzione e inclinazione, la camera resta sopra il punto. Rotazione con `requestAnimationFrame`, si ferma da sola se i fotogrammi superano ~70 ms; su telefono `setPixelRatio` ≤ 1,25.
+- Luce: `web/src/sun.ts` (posizione del sole, alba/tramonto) → `hillshade-method: basic` + direzione/altezza di illuminazione; velo scuro e cielo notturno quando il sole è sotto l'orizzonte. Ora iniziale: adesso se è giorno, altrimenti le 10:00.
+- Ingresso dalla scheda (`TrailView.preview`, `renderFlyBox` in main.ts): punto più alto, POI del percorso o tocco sulla linea (`pick3d` + `projectOnLine`). Durante l'anteprima sfondo "pulito" e zone attive visibili (ripristinati all'uscita); i clic sulla mappa sono ignorati. Uscita (pulsante o Esc) = stessa vista di prima. Immagine: canvas letto nell'evento `render` + didascalia. Nessun dato salvato.
+- `window.__q120map` espone la mappa solo per le prove automatiche.
 
 ## Design (fase 6)
 

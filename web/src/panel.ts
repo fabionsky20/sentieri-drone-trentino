@@ -163,6 +163,7 @@ export interface TrailView {
   photos: HTMLElement // contenitore delle foto, riempito da chi chiama
   mine?: HTMLElement // le mie uscite e la nota personale, riempito da chi chiama
   weather?: HTMLElement // meteo e volabilità, riempito da chi chiama
+  preview?: HTMLElement // anteprima di volo 3D, riempito da chi chiama
   onZone: (ids: string[]) => void
   onPoi: (id: string) => void
   onFit: () => void
@@ -268,6 +269,7 @@ export function renderTrail(v: TrailView): HTMLElement {
       segmentSection(v),
     ),
     v.weather ?? null,
+    v.preview ?? null,
     v.mine ?? null,
     h('section', {}, sectionHead('Profilo', fit), v.profile),
     poiChips(v),

@@ -3394,3 +3394,160 @@ button:disabled {
   padding: 0;
   min-height: 32px;
 }
+
+/* ---- anteprima di volo 3D ---- */
+
+body.fly3d .topbar,
+body.fly3d .side,
+body.fly3d .mine,
+body.fly3d .tabbar,
+body.fly3d .edgetab,
+body.fly3d .legend,
+body.fly3d .maptools,
+body.fly3d #sheet,
+body.fly3d .maplibregl-ctrl-bottom-right {
+  display: none !important;
+}
+
+body.fly3d .mapwrap {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 70;
+}
+
+.fly-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 71;
+  background: #08121f;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.fly-panel {
+  position: fixed;
+  z-index: 75;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  gap: 10px;
+  max-height: 42dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 16px calc(14px + var(--safe-b));
+  border-radius: 18px 18px 0 0;
+  background: var(--glass);
+  box-shadow: 0 -4px 24px rgb(20 32 36 / 0.25);
+}
+
+.fly-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fly-title h2 {
+  margin: 2px 0 0;
+  font-family: var(--font-cond);
+  font-weight: 700;
+  font-size: 20px;
+  line-height: 1.15;
+  text-transform: uppercase;
+}
+
+.fly-title p {
+  margin: 0;
+}
+
+.fly-exit {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+}
+
+.fly-read,
+.fly-sun {
+  margin: 0;
+}
+
+.fly-slider {
+  display: grid;
+  gap: 2px;
+}
+
+.fly-k {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.fly-k .mono {
+  text-transform: none;
+  color: var(--ink);
+}
+
+.fly-slider input {
+  width: 100%;
+  min-height: 36px;
+  accent-color: var(--accent);
+}
+
+.fly-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fly-row .segmented {
+  flex: 1;
+}
+
+.fly-play {
+  min-height: 44px;
+  padding: 0 14px;
+}
+
+.fly-panel select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-tile);
+  background: var(--panel);
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.fly-panel .hint {
+  margin: 0;
+}
+
+@media (min-width: 768px) {
+  .fly-panel {
+    left: auto;
+    top: 16px;
+    right: 16px;
+    bottom: 16px;
+    width: 340px;
+    max-height: none;
+    align-content: start;
+    border-radius: var(--r-panel);
+  }
+}
+
+body.picking3d #map canvas {
+  cursor: crosshair;
+}
