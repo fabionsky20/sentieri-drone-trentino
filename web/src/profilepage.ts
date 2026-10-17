@@ -26,6 +26,8 @@ export interface ProfileActions {
   /** Bacheche di cui sono proprietario (per l'invito diretto nel link). */
   ownedBoards: () => { id: string; nome: string }[]
   toast: (msg: string) => void
+  /** Statistiche private (le disegna main.ts, che ha i dati dei sentieri). */
+  statsSection: () => HTMLElement
 }
 
 // ---------------------------------------------------------------- scadenze
@@ -486,13 +488,7 @@ export function renderProfilePage(st: AccountState | null, a: ProfileActions, re
       switchRow('Visibile nella ricerca degli amici', p.cercabile, (on) => void a.setSearchable(on).catch(() => {})),
       h('p', { class: 'hint' }, 'Se attivo, chi usa Quota 120 può trovarti per nome (si vedono solo nome e foto) e invitarti nelle bacheche. Storico e statistiche restano privati.'),
     ),
-    h(
-      'section',
-      {},
-      h('p', { class: 'section-label' }, 'Statistiche'),
-      h('div', { class: 'tiles three placeholder' }, ...['SENTIERI FATTI', 'KM', 'GRUPPI'].map((k) => h('div', { class: 'tile' }, h('span', { class: 'tile-k' }, k), h('span', { class: 'tile-v off' }, '—')))),
-      h('p', { class: 'hint' }, 'In arrivo: sentieri segnati come fatti e statistiche, private per impostazione.'),
-    ),
+    a.statsSection(),
     dangerZone(a),
   ].filter((x): x is HTMLElement => !!x)
 }

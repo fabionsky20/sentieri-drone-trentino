@@ -8,6 +8,8 @@
 //   ├ droni/{id}                    hangar
 //   ├ bacheche/{board}              indice delle bacheche dell'utente (lo scrive solo lui)
 //   ├ notifiche/{id}                notifiche in app: le scrivono gli altri membri, le legge solo lui
+//   ├ uscite/{id}                   sentieri fatti (data, con chi, commento, drone sì/no, km/D+ GPX)
+//   ├ note/{trail}                  note personali sui sentieri
 //   └ amici/{uid}                   amici entrati con il mio link (li scrive l'invitato, li leggo io)
 // - profili/{uid}                   rubrica pubblica (solo nome e foto) per la ricerca degli amici
 // - codiciInvito/{codice}           link "Invita amici": chi invita (uid e nome), leggibile col codice
@@ -189,6 +191,30 @@ service cloud.firestore {
           && notifRelated(uid, request.resource.data);
       }
 
+      // Uscite ("segna come fatto"): solo del proprietario. Data, con chi, commento, se c'era
+      // il drone, km e dislivello a piedi da GPX. REGOLA FISSA: nessun campo di quota/volo
+      // (hasOnly rifiuta qualunque altro campo).
+      match /uscite/{o} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && o.size() <= 40
+          && validOuting(request.resource.data)
+          && request.resource.data.creato == request.time;
+        allow update: if isOwner(uid)
+          && validOuting(request.resource.data)
+          && request.resource.data.creato == resource.data.creato;
+      }
+
+      // Note personali sul sentiero: solo del proprietario.
+      match /note/{trail} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && validTrail(trail)
+          && request.resource.data.keys().hasOnly(['testo', 'aggiornato'])
+          && str(request.resource.data.testo, 1, 2000)
+          && request.resource.data.aggiornato == request.time;
+      }
+
       // Amici entrati con il mio link. Li crea l'invitato, una volta sola, mentre crea il proprio
       // profilo, e solo conoscendo il mio codice. Li leggo io; ognuno può togliere la propria voce.
       match /amici/{f} {
@@ -226,6 +252,30 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome'])
         && str(request.resource.data.nome, 1, 60);
       allow delete: if signedIn() && (resource == null || resource.data.uid == request.auth.uid);
+    }
+
+    // Data dell'uscita: AAAA-MM-GG reale, dal 1980 a fine anno prossimo.
+    function outingDate(v) {
+      return v is string
+        && v.matches('^(19[89][0-9]|20[0-9]{2})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$')
+        && int(v.split('-')[0]) <= request.time.year() + 1;
+    }
+
+    function validOuting(d) {
+      return d.keys().hasAll(['sentiero', 'data', 'con', 'conUid', 'drone', 'creato', 'aggiornato'])
+        && d.keys().hasOnly(['sentiero', 'data', 'con', 'conUid', 'commento', 'drone',
+                             'gpx_km', 'gpx_dplus', 'creato', 'aggiornato'])
+        && validTrail(d.sentiero)
+        && outingDate(d.data)
+        && d.con is list && d.con.size() <= 20
+        && d.conUid is list && d.conUid.size() <= 20
+        && optStr(d.get('commento', null), 500)
+        && d.drone is bool
+        && (d.get('gpx_km', null) == null
+            || (d.gpx_km is number && d.gpx_km >= 0 && d.gpx_km <= 300))
+        && (d.get('gpx_dplus', null) == null
+            || (d.gpx_dplus is int && d.gpx_dplus >= 0 && d.gpx_dplus <= 15000))
+        && d.aggiornato == request.time;
     }
 
     function validNotif(d) {

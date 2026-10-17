@@ -16,6 +16,8 @@ import { renderProfile } from './profile'
 import type { AccountState } from './account'
 import type { BoardsState } from './boards'
 import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, type BoardsActions, type TrailInfo } from './boardsui'
+import { gpxDraft, newDraft, renderMyTrail, renderStats, type OutingActions, type OutingDraft, type Person } from './outingsui'
+import { nearestTrail, parseGpx, type GpxTrack } from './outings'
 import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, renderWelcomeInvite, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt } from './trailgeom'
@@ -316,6 +318,23 @@ map.addLayer(
     source: 'segments',
     layout: round,
     paint: { 'line-color': colorExpr('c'), 'line-opacity': dimmed(1, 0.2), 'line-width': byZoom(...widths()) },
+  },
+  FIRST_LABEL,
+)
+// Sentieri già fatti: un puntinato scuro sopra il colore (si spegne dai filtri).
+map.addLayer(
+  {
+    id: 'seg-done',
+    type: 'line',
+    source: 'segments',
+    filter: ['in', ['get', 'sentiero_id'], ['literal', []]],
+    layout: round,
+    paint: {
+      'line-color': '#142024',
+      'line-opacity': dimmed(0.85, 0.15),
+      'line-width': byZoom(8, 0.8, 12, 1.4, 16, 2.4),
+      'line-dasharray': [0.1, 2.4],
+    },
   },
   FIRST_LABEL,
 )
@@ -715,6 +734,9 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const back: Selection = { kind: 'trail', id: trail.id, seg: segId }
   const seg = segId ? segById.get(segId) : undefined
   currentSave = { trailId: trail.id, box: foot }
+  const myBox = h('section', { class: 'mybox' })
+  currentMine = { trailId: trail.id, box: myBox }
+  renderMyTrailBox(true)
   return renderTrail({
     trail,
     day,
@@ -728,6 +750,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     pois,
     profile: profileBox,
     photos: photosSection(photoPoints, 1500),
+    mine: myBox,
     onZone: (ids) => select({ kind: 'zones', ids, back }),
     onPoi: (id) => select({ kind: 'poi', id, back }),
     onFit: () => fitTrail(trail),
@@ -740,6 +763,7 @@ function render(): void {
   map.setFilter('seg-sel', ['==', ['get', 'sentiero_id'], trailId])
   map.setFilter('zone-sel', ['in', ['get', 'zona_id'], ['literal', selection?.kind === 'zones' ? selection.ids : []]])
   map.setFilter('poi-sel', ['==', ['get', 'id'], selection?.kind === 'poi' ? selection.id : ''])
+  currentMine = null
   if (!selection) {
     sheet.hidden = true
     currentSave = null
@@ -852,6 +876,7 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
     km: kmOf(t.id),
     closed: closedIds.has(t.id),
     saved: !!acct?.miei.has(t.id) || inBoards(t.id),
+    done: doneSet.has(t.id),
     ...extra,
     onOpen: () => {
       select({ kind: 'trail', id: t.id })
@@ -861,6 +886,8 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
 }
 
 function applyFilters(): void {
+  doneSet = new Set(acct?.status === 'pronto' ? acct.uscite.map((o) => o.sentiero) : [])
+  map.setFilter('seg-done', ['in', ['get', 'sentiero_id'], ['literal', filters.segnaFatti ? [...doneSet] : []]])
   const active = activeCount(filters)
   const ok = new Set<string>()
   const results: Trail[] = []
@@ -870,6 +897,7 @@ function applyFilters(): void {
       closed: closedIds.has(t.id),
       mine: acct?.miei.has(t.id) ?? false,
       shared: inBoards(t.id),
+      done: doneSet.has(t.id),
     }
     if (matches(t, ctx, filters)) {
       ok.add(t.id)
@@ -1041,6 +1069,9 @@ let acct: AccountState | null = null
 let boardsSt: BoardsState | null = null
 let accountModule: Promise<typeof import('./account')> | null = null
 let currentSave: { trailId: string; box: HTMLElement } | null = null
+let currentMine: { trailId: string; box: HTMLElement } | null = null
+let outingDraft: { trailId: string; draft: OutingDraft } | null = null
+let doneSet = new Set<string>() // sentieri con almeno un'uscita
 type SavedTab = 'miei' | 'bacheche'
 let savedTab: SavedTab = 'miei'
 let currentBoard: string | null = null
@@ -1057,6 +1088,7 @@ function loadAccount(): Promise<typeof import('./account')> {
           acct = st
           store('salvati-attivo', st.status !== 'anonimo')
           renderSaveBox()
+          renderMyTrailBox()
           renderSavedSheet()
           renderProfileView()
           renderAvatars()
@@ -1134,6 +1166,11 @@ const accountActions = (): ProfileActions => ({
   },
   ownedBoards: () => [...(boardsSt?.boards.values() ?? [])].filter((b) => b.ruolo === 'owner').map((b) => ({ id: b.id, nome: b.nome })),
   toast: showToast,
+  statsSection: () =>
+    renderStats(
+      { outings: acct?.uscite ?? [], trails, pois, lines: trailLines, nome: acct?.profile?.nome ?? '', onShowMap: showDoneOnMap, onImportGpx: (f) => void importGpx(f), toast: showToast },
+      () => renderProfileView(true),
+    ),
   zoneSuggestions: [...gruppi, ...valleysFC.features.filter((f) => f.properties.principale).map((f) => f.properties.nome)].sort((a, b) =>
     a.localeCompare(b, 'it'),
   ),
@@ -1182,6 +1219,96 @@ const boardsActions = (): BoardsActions => {
     markAllRead: async () => (await m()).markAllRead(),
     toast: showToast,
   }
+}
+
+// ---- uscite ("segna come fatto"), note personali, GPX
+
+/** Amici dell'app per "con chi": invitati da me, chi mi ha invitato, membri delle mie bacheche. */
+function appFriends(): Person[] {
+  const m = new Map<string, string>()
+  for (const f of acct?.amici ?? []) m.set(f.uid, f.nome)
+  const p = acct?.profile
+  if (p?.invitato_da) m.set(p.invitato_da, p.invitato_da_nome ?? 'Amico')
+  for (const b of boardsSt?.boards.values() ?? []) for (const x of b.membri) m.set(x.uid, x.nome)
+  m.delete(acct?.user?.uid ?? '')
+  return [...m].map(([uid, nome]) => ({ uid, nome })).sort((a, b) => a.nome.localeCompare(b.nome, 'it'))
+}
+
+const outingActions = (): OutingActions => ({
+  login: doLogin,
+  saveOuting: async (o, id) => (await loadAccount()).saveOuting(o, id),
+  deleteOuting: async (id) => (await loadAccount()).deleteOuting(id),
+  saveNote: async (trail, testo) => (await loadAccount()).saveNote(trail, testo),
+  toast: showToast,
+})
+
+/** "Le mie uscite" e nota personale nella scheda. Non ridisegna mentre si scrive. */
+function renderMyTrailBox(force = false): void {
+  if (!currentMine) return
+  const { trailId, box } = currentMine
+  const active = document.activeElement
+  if (!force && active && box.contains(active) && (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement || box.querySelector('.outingform'))) return
+  const trail = trails.get(trailId)
+  if (!trail) return
+  const logged = acct?.status === 'pronto'
+  if (outingDraft && outingDraft.trailId !== trailId) outingDraft = null
+  box.replaceChildren(
+    renderMyTrail({
+      trail,
+      line: trailLines.get(trailId),
+      logged,
+      outings: logged ? acct!.uscite.filter((o) => o.sentiero === trailId) : [],
+      note: logged ? (acct!.note.get(trailId) ?? null) : null,
+      friends: logged ? appFriends() : [],
+      draft: outingDraft?.draft ?? null,
+      setDraft: (d) => {
+        outingDraft = d ? { trailId, draft: d } : null
+        renderMyTrailBox(true)
+        if (d) box.querySelector('.outingform')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      },
+      a: outingActions(),
+    }),
+  )
+}
+
+/** Statistiche → "Mostra sulla mappa": filtro "Solo fatti" e zoom sui sentieri fatti. */
+function showDoneOnMap(ids: string[]): void {
+  filters.fatti = 'si'
+  filters.segnaFatti = true
+  drawForm()
+  applyFilters()
+  const boxes = ids.map((id) => trails.get(id)?.bbox).filter((b): b is Trail['bbox'] => !!b)
+  if (mobile()) setTab('map')
+  else setLeft(true)
+  if (boxes.length) {
+    const b: [number, number, number, number] = [Math.min(...boxes.map((x) => x[0])), Math.min(...boxes.map((x) => x[1])), Math.max(...boxes.map((x) => x[2])), Math.max(...boxes.map((x) => x[3]))]
+    map.fitBounds(b, { padding: fitPadding(), maxZoom: 14 })
+  }
+}
+
+/** GPX dal profilo: si associa al sentiero SAT più vicino e si apre "Segna come fatto". */
+async function importGpx(file: File): Promise<void> {
+  let track: GpxTrack
+  try {
+    track = parseGpx(await file.text())
+  } catch (e) {
+    showToast((e as Error).message)
+    return
+  }
+  const best = nearestTrail(track, trailList, trailLines)
+  if (!best) {
+    showToast('Nessun sentiero SAT vicino a questa traccia.')
+    return
+  }
+  const t = best.trail
+  const draft = newDraft({ gpx: gpxDraft(track, best.share) })
+  if (track.date) draft.data = track.date
+  outingDraft = { trailId: t.id, draft }
+  if (mobile()) setTab('map')
+  select({ kind: 'trail', id: t.id })
+  fitTrail(t)
+  showToast(`Traccia associata a ${t.numero} · ${t.titolo} (la segue per il ${Math.round(best.share * 100)}%).`)
+  requestAnimationFrame(() => currentMine?.box.querySelector('.outingform')?.scrollIntoView({ block: 'start', behavior: 'smooth' }))
 }
 
 async function toggleMine(trailId: string): Promise<void> {

@@ -71,10 +71,13 @@ export interface AccountState {
   membri: Map<string, string> // uid → nome (solo membri storici)
   legacyMember: boolean // può vedere la lista condivisa storica
   amici: Friend[] // entrati con il mio link, dal più recente
+  uscite: Outing[] // sentieri fatti, dalla più recente (private)
+  note: Map<string, string> // sentiero → nota personale (privata)
   errore?: string
 }
 
 import { purgeBoardsData, startBoards, stopBoards } from './boards'
+import type { Outing, OutingInput } from './outings'
 import { auth, db } from './fb'
 
 export * from './boards'
@@ -87,6 +90,8 @@ const EMPTY = (): Omit<AccountState, 'status' | 'user'> => ({
   membri: new Map(),
   legacyMember: false,
   amici: [],
+  uscite: [],
+  note: new Map(),
 })
 let state: AccountState = { status: 'caricamento', user: null, ...EMPTY() }
 const listeners = new Set<(s: AccountState) => void>()
@@ -256,6 +261,31 @@ async function start(user: User): Promise<void> {
         }),
       () => {},
     ),
+    onSnapshot(
+      collection(db, 'users', uid, 'uscite'),
+      (s) =>
+        emit({
+          uscite: s.docs
+            .map((d) => ({
+              id: d.id,
+              sentiero: String(d.get('sentiero')),
+              data: String(d.get('data')),
+              con: (d.get('con') as string[] | undefined) ?? [],
+              conUid: (d.get('conUid') as string[] | undefined) ?? [],
+              commento: d.get('commento') ?? null,
+              drone: !!d.get('drone'),
+              gpxKm: d.get('gpx_km') ?? null,
+              gpxDplus: d.get('gpx_dplus') ?? null,
+            }))
+            .sort((a, b) => b.data.localeCompare(a.data)),
+        }),
+      fail,
+    ),
+    onSnapshot(
+      collection(db, 'users', uid, 'note'),
+      (s) => emit({ note: new Map(s.docs.map((d) => [d.id, String(d.get('testo') ?? '')])) }),
+      fail,
+    ),
   )
   // Lista condivisa storica: solo per chi è nella raccolta "membri".
   try {
@@ -377,6 +407,39 @@ export async function removeDrone(id: string): Promise<void> {
   await deleteDoc(doc(db, 'users', uid(), 'droni', id))
 }
 
+// ---------------------------------------------------------------- uscite e note personali (private)
+
+/** Salva un'uscita ("segna come fatto"). Nessuna quota né dato di volo: solo se c'era il drone. */
+export async function saveOuting(o: OutingInput, id?: string): Promise<void> {
+  const u = uid()
+  const ref = id ? doc(db, 'users', u, 'uscite', id) : doc(collection(db, 'users', u, 'uscite'))
+  const con = o.con.map((n) => n.trim().slice(0, 60)).filter(Boolean).slice(0, 20)
+  await setDoc(ref, {
+    sentiero: o.sentiero,
+    data: o.data,
+    con,
+    conUid: o.conUid.slice(0, 20),
+    commento: o.commento?.trim().slice(0, 500) || null,
+    drone: o.drone,
+    gpx_km: o.gpxKm == null ? null : Math.round(o.gpxKm * 100) / 100,
+    gpx_dplus: o.gpxDplus == null ? null : Math.round(o.gpxDplus),
+    ...(id ? {} : { creato: serverTimestamp() }),
+    aggiornato: serverTimestamp(),
+  }, { merge: !!id })
+}
+
+export async function deleteOuting(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'users', uid(), 'uscite', id))
+}
+
+/** Nota personale sul sentiero; vuota = cancellata. */
+export async function saveNote(trailId: string, testo: string): Promise<void> {
+  const ref = doc(db, 'users', uid(), 'note', trailId)
+  const v = testo.trim().slice(0, 2000)
+  if (!v) await deleteDoc(ref)
+  else await setDoc(ref, { testo: v, aggiornato: serverTimestamp() })
+}
+
 // ---------------------------------------------------------------- salvati
 
 export async function save(list: ListName, trailId: string): Promise<void> {
@@ -408,6 +471,8 @@ export async function deleteAccount(): Promise<void> {
     ...(await getDocs(collection(db, 'users', u, 'droni'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'utenti', u, 'salvati'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'users', u, 'amici'))).docs.map((d) => d.ref),
+    ...(await getDocs(collection(db, 'users', u, 'uscite'))).docs.map((d) => d.ref),
+    ...(await getDocs(collection(db, 'users', u, 'note'))).docs.map((d) => d.ref),
   ]
   // Il mio codice di invito e la mia voce tra gli amici di chi mi ha invitato.
   if (state.profile?.invito_codice) refs.push(doc(db, 'codiciInvito', state.profile.invito_codice))

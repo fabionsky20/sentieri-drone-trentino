@@ -10,7 +10,7 @@ Questo file è il riferimento per tutte le fasi. Dettagli sui dati reali: [docs/
 ## Roadmap (sintesi) — dettagli in [docs/ROADMAP.md](docs/ROADMAP.md)
 
 - **Uso attuale privato** (gruppo di ~10 amici), **costo zero**: GitHub Pages + Firebase Spark. Niente di commerciale (no ads, no pagamenti) finché non ci saranno permessi da D-Flight.
-- **Fase 1 Fondamenta:** A login aperto + profilo + hangar ✅ → B bacheche condivise con inviti → C note sui sentieri, "segna come fatto", statistiche → D meteo e indice di volabilità.
+- **Fase 1 Fondamenta:** A login aperto + profilo + hangar ✅ → B bacheche condivise con inviti ✅ → C note sui sentieri, "segna come fatto", statistiche ✅ → D meteo e indice di volabilità.
 - **Fase 2 Beta:** PWA offline, notifiche push, anteprima di volo 3D (camera a 120 m che ruota a 360°), ostacoli da OSM (cavi, linee elettriche, elisuperfici), segnalazioni con scadenza, Android in test chiuso.
 - **Dopo:** luce/ora d'oro, mare di nubi, "cosa vedo da qui", punti di decollo, badge, card Instagram, lista inquadrature.
 - **REGOLA FISSA: l'app non registra, chiede o mostra MAI la quota a cui l'utente ha volato, né importa log di volo. Nessuna statistica di quota volata.** Si mostrano solo i limiti dello spazio aereo.
@@ -127,6 +127,7 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
   - Gli avvisi "Cross-Origin-Opener-Policy … window.closed" in console durante il login con popup sono noti e innocui.
 - **Fase 6** ✅ redesign grafico (solo estetica e layout). Regole in "Design" qui sotto.
 - **Roadmap Fase 1 · passo A** ✅ nome "Quota 120", manifest PWA (`web/public/`), login aperto, profilo, onboarding, hangar, scadenze. Vedi "Account" qui sotto.
+- **Roadmap Fase 1 · passo C** ✅ note personali, "segna come fatto", GPX, fatti sulla mappa, statistiche private. Vedi "Uscite e statistiche" qui sotto.
 - **Roadmap Fase 1 · passo B** ✅ bacheche condivise con ruoli, inviti (link e ricerca per nome), "ci sto", note, notifiche in-app, migrazione di "Condivisi". Vedi "Bacheche" qui sotto.
 
 ## Account (Roadmap Fase 1 · A)
@@ -148,6 +149,13 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
 - Migrazione: pulsante "TRASFORMA IN BACHECA" visibile ai membri storici finché non esiste la bacheca `condivisi`; chi lo preme diventa proprietario.
 - `firestore.rules`: ogni utente legge/scrive solo i propri dati, campi in whitelist (`hasOnly`), lunghezze, date AAAA-MM-GG, classe/peso validati, timestamp del server. **Vanno pubblicate a mano dalla console** dopo ogni modifica. Guida e modello dati: [docs/ACCOUNT.md](docs/ACCOUNT.md).
 - Prove: emulatori Firebase (Java 21 + `firebase-tools`), `?emulatori` su localhost collega l'app agli emulatori (progetto `demo-quota120`). Mai email o dati personali nel repo.
+
+## Uscite e statistiche (Roadmap Fase 1 · C)
+
+- `web/src/outings.ts` (logica: `parseGpx`, `matchTrail`/`nearestTrail` = quota di punti della traccia entro 80 m dal sentiero, `computeStats`) + `web/src/outingsui.ts` (sezione "Le mie uscite" nella scheda tramite `TrailView.mine`, modulo con bozza `OutingDraft` che sopravvive ai ridisegni, statistiche, mappa personale SVG, esportazione PNG su canvas: condivisione nativa sul telefono, download su PC).
+- Dati privati: `users/{uid}/uscite`, `users/{uid}/note/{sentiero}`. **Regola fissa:** dal GPX si salvano solo km e D+; si chiede solo "avevo il drone?"; la "quota più alta" delle statistiche è la quota massima del sentiero (a piedi). Le regole rifiutano ogni campo in più.
+- Km e D+ di un'uscita: dal GPX se presente, altrimenti dal sentiero. "Con chi": amici dell'app (invitati, chi mi ha invitato, membri delle bacheche) o nomi liberi.
+- Mappa: layer `seg-done` (puntinato scuro sui sentieri fatti, interruttore "Segna sulla mappa i sentieri fatti"); filtro `fatti` ('' / 'no' / 'si'). IMPORTA GPX dal profilo apre il sentiero più vicino con il modulo già compilato.
 
 ## Design (fase 6)
 

@@ -2061,6 +2061,11 @@ button:disabled {
 }
 
 .noteform textarea,
+.mytrail textarea,
+.outingform input[type='date'],
+.outingform input[type='text'],
+.stats select,
+.friends select,
 .row-input input,
 .invite-section input[type='search'],
 .invite-section input[type='text'],
@@ -2795,3 +2800,243 @@ button:disabled {
   margin-top: 10px;
 }
 
+
+/* ---- passo C: uscite, note personali, statistiche ---- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.done-mark {
+  display: inline-grid;
+  color: var(--ink);
+}
+
+.pill.done {
+  gap: 4px;
+  border-color: var(--ink);
+}
+
+.mytrail {
+  display: grid;
+  gap: 10px;
+}
+
+.mytrail .section-head {
+  margin-bottom: 0;
+}
+
+.note-head {
+  margin-top: 6px;
+}
+
+.outings {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outings li {
+  padding: 8px 10px;
+  border-radius: var(--r-tile);
+  background: var(--panel2);
+}
+
+.outings p {
+  margin: 4px 0 0;
+}
+
+.outing-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.outing-top .mono {
+  flex: 1;
+  font-weight: 600;
+}
+
+.outing-top .pill {
+  gap: 4px;
+}
+
+.outingform {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-tile);
+}
+
+.outingform .field {
+  margin: 0;
+}
+
+.outingform .chipgrid:empty {
+  display: none;
+}
+
+.addname {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.gpxsum {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  border-radius: var(--r-tile);
+  background: var(--accent-tint);
+}
+
+.gpxbox .hint,
+.gpxbox p {
+  margin: 4px 0 0;
+}
+
+.icon-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stats {
+  display: grid;
+  gap: 10px;
+}
+
+.stats .section-head {
+  margin-bottom: 0;
+}
+
+.stats .section-head select {
+  width: auto;
+  min-height: 40px;
+  font-size: 14px;
+}
+
+.stats .section-label.sub {
+  margin: 8px 0 0;
+}
+
+.tiles.statstiles {
+  grid-template-columns: 1fr 1fr;
+}
+
+.monthchart {
+  width: 100%;
+  height: auto;
+}
+
+.monthchart .bar {
+  fill: var(--accent);
+}
+
+.monthchart .axis {
+  stroke: var(--line);
+}
+
+.monthchart text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-anchor: middle;
+  fill: var(--muted);
+}
+
+.monthchart .val {
+  fill: var(--ink);
+  font-weight: 600;
+}
+
+.collect {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.collect details {
+  padding: 8px 10px;
+  border-radius: var(--r-tile);
+  background: var(--panel2);
+}
+
+.collect summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.collect summary span:first-of-type {
+  flex: 1;
+}
+
+.collect summary .mono {
+  font-weight: 600;
+}
+
+.collect p {
+  margin: 6px 0 0;
+}
+
+.records {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.records li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-tile);
+  background: var(--panel2);
+}
+
+.records li .mono {
+  font-weight: 600;
+}
+
+.records li .small:last-child {
+  grid-column: 1 / -1;
+}
+
+.personalmap {
+  width: 100%;
+  height: auto;
+  border-radius: var(--r-tile);
+  background: var(--panel2);
+}
+
+.personalmap .base {
+  fill: none;
+  stroke: rgb(20 32 36 / 0.18);
+  stroke-width: 0.8;
+}
+
+.personalmap .mine {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.form-actions.wrap {
+  flex-wrap: wrap;
+}

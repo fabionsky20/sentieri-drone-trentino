@@ -6,6 +6,7 @@ import type { PoiCategory, Trail } from './types'
 
 export type Volo = 'qualsiasi' | 'verde' | 'tutto'
 export type Salvati = '' | 'miei' | 'condivisi' | 'entrambi'
+export type Fatti = '' | 'no' | 'si' // '' = tutti, 'no' = non ancora fatti, 'si' = solo fatti
 export type KmByColor = { verde: number; giallo: number; rosso: number }
 
 export interface FilterState {
@@ -20,6 +21,8 @@ export interface FilterState {
   dislMax: number | null // m di dislivello positivo
   quotaMin: number | null // quota massima raggiunta, almeno (m)
   gruppo: string // '' = tutti
+  fatti: Fatti
+  segnaFatti: boolean // segno sulla mappa per i sentieri già fatti (non è un filtro)
 }
 
 export const defaultFilters = (): FilterState => ({
@@ -34,6 +37,8 @@ export const defaultFilters = (): FilterState => ({
   dislMax: null,
   quotaMin: null,
   gruppo: '',
+  fatti: '',
+  segnaFatti: true,
 })
 
 /** Quanti filtri sono attivi (per il numerino sul pulsante). */
@@ -47,7 +52,8 @@ export function activeCount(f: FilterState): number {
     Number(f.quotaMin != null) +
     Number(!!f.gruppo) +
     Number(f.soloAperti) +
-    Number(!!f.salvati)
+    Number(!!f.salvati) +
+    Number(!!f.fatti)
   )
 }
 
@@ -59,6 +65,7 @@ export interface TrailContext {
   closed: boolean
   mine: boolean // nei miei salvati
   shared: boolean // nella lista condivisa
+  done: boolean // l'ho già fatto (almeno un'uscita)
 }
 
 export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
@@ -67,6 +74,8 @@ export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
   if (f.salvati === 'miei' && !ctx.mine) return false
   if (f.salvati === 'condivisi' && !ctx.shared) return false
   if (f.salvati === 'entrambi' && !ctx.mine && !ctx.shared) return false
+  if (f.fatti === 'no' && ctx.done) return false
+  if (f.fatti === 'si' && !ctx.done) return false
   if (f.volo === 'verde' && km.verde < f.verdeKm) return false
   if (f.volo === 'tutto' && km.rosso > 0.005) return false
   for (const c of f.vicino) if (!t.badge.includes(c)) return false
@@ -251,12 +260,32 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     savedSeg,
   )
 
+  // SENTIERI FATTI (le mie uscite)
+  const fatti = segmented<Fatti>(
+    [
+      ['', 'Tutti'],
+      ['no', 'Non ancora fatti'],
+      ['si', 'Solo fatti'],
+    ],
+    f.fatti,
+    (v) => {
+      f.fatti = v
+      onChange()
+    },
+    'small',
+  )
+  const segna = switchRow('Segna sulla mappa i sentieri fatti', f.segnaFatti, (on) => {
+    f.segnaFatti = on
+    onChange()
+  })
+
   form.append(
     h('section', {}, label('Volo'), volo, verdeTile, voloHelp),
     h('section', {}, label('Passa vicino a'), near),
     h('section', {}, label('Difficoltà'), diff),
     h('section', {}, grid),
     h('section', {}, switches),
+    h('section', {}, label('Sentieri fatti'), fatti, h('div', { class: 'switches' }, segna)),
   )
   return form
 }
