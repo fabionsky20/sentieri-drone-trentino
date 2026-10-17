@@ -206,17 +206,21 @@ export function agreement(points: PointWx[]): Agreement {
   const a = dayHours(p, p.hours)
   const b = dayHours(p, p.alt)
   const mm = (hs: HourWx[]) => hs.reduce((s, h) => s + (h.mm ?? 0), 0)
-  const ore = (hs: HourWx[]) => hs.filter((h) => (h.mm ?? 0) >= PIOGGIA.asciuttoSotto).length
   const raff = (hs: HourWx[]) => Math.max(0, ...hs.map((h) => h.g10 ?? 0))
   const [na, nb] = [short(p.model), short(p.altModel)]
   const fmt = (x: number) => x.toLocaleString('it-IT', { maximumFractionDigits: 1 })
-  const [ma, mb, oa, ob, ga, gb] = [mm(a), mm(b), ore(a), ore(b), raff(a), raff(b)]
+  const [ma, mb, ga, gb] = [mm(a), mm(b), raff(a), raff(b)]
   const motivi: string[] = []
-  const secco = (x: number) => x < 0.5
-  if ((secco(ma) && mb >= INCERTEZZA.pioggiaMm) || (secco(mb) && ma >= INCERTEZZA.pioggiaMm) || Math.abs(oa - ob) >= INCERTEZZA.oreDiPioggia) {
-    motivi.push(`pioggia: ${na} ${fmt(ma)} mm, ${nb} ${fmt(mb)} mm`)
+  // Solo disaccordi netti: un modello asciutto e l'altro con pioggia vera, o raffiche molto diverse.
+  const secco = (x: number) => x < INCERTEZZA.asciuttoSotto
+  const desc = (x: number) => (secco(x) ? 'asciutto' : `${fmt(x)} mm`)
+  if ((secco(ma) && mb > INCERTEZZA.pioggiaMm) || (secco(mb) && ma > INCERTEZZA.pioggiaMm)) {
+    motivi.push(`pioggia: ${na} ${desc(ma)}, ${nb} ${desc(mb)}`)
   }
-  if (Math.abs(ga - gb) >= INCERTEZZA.raffiche) motivi.push(`raffiche: ${na} ${Math.round(ga)} km/h, ${nb} ${Math.round(gb)} km/h`)
+  // Raffiche: conta solo se cambia la risposta ("si vola" per un modello, no per l'altro) e se
+  // non è comunque un giorno di pioggia per entrambi.
+  const bagnato = ma > INCERTEZZA.pioggiaMm && mb > INCERTEZZA.pioggiaMm
+  if (!bagnato && Math.abs(ga - gb) > INCERTEZZA.raffiche && Math.min(ga, gb) < INCERTEZZA.raffVolabili) motivi.push(`raffiche massime: ${na} ${Math.round(ga)} km/h, ${nb} ${Math.round(gb)} km/h`)
   return { stato: motivi.length ? 'incerto' : 'buono', modelli: [na, nb], dettaglio: motivi.join(' · ') || null }
 }
 

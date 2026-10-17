@@ -118,11 +118,13 @@ export const NOME_MODELLO: Record<string, string> = {
   gfs_seamless: 'NOAA GFS',
 }
 
-/** Disaccordo forte tra i due modelli nelle ore di luce → "previsione incerta". */
+/** Disaccordo FORTE tra i due modelli nelle ore di luce → "previsione incerta".
+ *  Solo nei casi netti: piccole differenze sono normali e non vanno segnalate. */
 export const INCERTEZZA = {
-  pioggiaMm: 2, // un modello asciutto (< 0,5 mm) e l'altro con almeno questi mm nel giorno
-  oreDiPioggia: 3, // differenza di ore di pioggia (≥ 0,2 mm/h)
-  raffiche: 20, // differenza delle raffiche massime (km/h)
+  asciuttoSotto: 0.5, // mm nel giorno: sotto, il modello dice "asciutto"
+  pioggiaMm: 2, // l'altro modello prevede più di questi mm nel giorno
+  raffiche: 25, // differenza delle raffiche massime oltre questi km/h…
+  raffVolabili: 40, // …e solo se per uno dei due modelli si vola (raffiche sotto questi km/h)
 }
 
 /** Quanti giorni avanti prevede Open-Meteo (oltre: "nessuna previsione"). */
