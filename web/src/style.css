@@ -3356,3 +3356,41 @@ button:disabled {
   text-transform: none;
   font-weight: 500;
 }
+
+.wxrain {
+  margin: 0;
+}
+
+.wxmodel {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--r-tile);
+  background: var(--panel2);
+}
+
+.wxmodel p {
+  margin: 0;
+}
+
+.wxmodel.uncertain {
+  border-left: 4px solid var(--giallo);
+}
+
+.wxuncertain {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  color: var(--ink);
+}
+
+.wxuncertain svg {
+  align-self: center;
+}
+
+.wxlink {
+  justify-self: start;
+  padding: 0;
+  min-height: 32px;
+}

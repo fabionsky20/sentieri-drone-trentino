@@ -3,7 +3,7 @@
 // (con fascia di quota, perché in montagna il meteo dipende dall'altezza) e si chiedono con
 // richieste multi-punto; cache in memoria e nel browser per un'ora.
 
-import { CACHE_MINUTI, FASCIA_QUOTA_M, GIORNI_PREVISIONE, GRIGLIA_GRADI, PUNTI_PER_RICHIESTA } from './flyconfig'
+import { CACHE_MINUTI, FASCIA_QUOTA_M, GIORNI_MODELLO_VICINO, GIORNI_PREVISIONE, GRIGLIA_GRADI, MODELLI, PUNTI_PER_RICHIESTA } from './flyconfig'
 
 /** Meteo di un'ora in un punto. */
 export interface HourWx {
@@ -19,10 +19,14 @@ export interface HourWx {
 }
 
 export interface PointWx {
-  hours: HourWx[] // 24 ore locali (0–23)
+  hours: HourWx[] // 24 ore locali (0–23), modello principale (+ i dati che gli mancano dal secondo)
   sunrise: string | null // "HH:MM" locale
   sunset: string | null
   utcOffset: number // secondi (ora legale compresa)
+  model: string // modello principale usato per questo giorno
+  filledFrom: string | null // da quale modello vengono vento in quota/visibilità se mancano al principale
+  alt: HourWx[] | null // secondo modello, per l'accordo tra modelli
+  altModel: string | null
 }
 
 /** Punto per la previsione, già agganciato alla griglia. */
@@ -40,6 +44,14 @@ export function gridPoint(lon: number, lat: number, ele: number): WxPoint {
   return { key: `${gy}:${gx}:${band}`, lat: +(gy * GRIGLIA_GRADI).toFixed(4), lon: +(gx * GRIGLIA_GRADI).toFixed(4), ele: band * FASCIA_QUOTA_M }
 }
 
+/** Modelli per un giorno: ICON-CH nei primi giorni, poi ECMWF (vedi flyconfig). */
+export function modelsFor(day: string): { primario: string; secondo: string } {
+  const lim = new Date()
+  lim.setDate(lim.getDate() + GIORNI_MODELLO_VICINO)
+  const d = `${lim.getFullYear()}-${String(lim.getMonth() + 1).padStart(2, '0')}-${String(lim.getDate()).padStart(2, '0')}`
+  return day <= d ? MODELLI.vicino : MODELLI.lontano
+}
+
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 /** C'è una previsione per questo giorno? (passato o troppo lontano: no) */
@@ -55,7 +67,7 @@ export function forecastState(day: string): 'ok' | 'passato' | 'lontano' {
 
 type Entry = { at: number; d: PointWx | null }
 const mem = new Map<string, Entry>() // `${giorno}|${chiave}`
-const STORE_KEY = 'meteo-cache-v1'
+const STORE_KEY = 'meteo-cache-v2' // v2: due modelli per punto
 const fresh = (e: Entry | undefined) => !!e && Date.now() - e.at < CACHE_MINUTI * 60_000
 
 try {
@@ -91,31 +103,66 @@ const HOURLY = ['temperature_2m', 'precipitation_probability', 'precipitation', 
 interface OmLocation {
   utc_offset_seconds: number
   hourly: Record<string, (number | null)[]> & { time: string[] }
-  daily?: { sunrise?: string[]; sunset?: string[] }
+  daily?: Record<string, string[]>
 }
 
-function parseLocation(l: OmLocation): PointWx {
+/** Le 24 ore di un modello (con più modelli Open-Meteo aggiunge il suffisso _<modello>). */
+function hoursOf(l: OmLocation, model: string, multi: boolean): HourWx[] {
   const H = l.hourly
   const v = (name: string, i: number) => {
-    const x = H[name]?.[i]
+    const x = H[multi ? `${name}_${model}` : name]?.[i]
     return x == null || Number.isNaN(x) ? null : Number(x)
   }
-  const hours: HourWx[] = []
-  for (let i = 0; i < 24; i++) {
-    hours.push({
-      temp: v('temperature_2m', i),
-      pp: v('precipitation_probability', i),
-      mm: v('precipitation', i),
-      w10: v('wind_speed_10m', i),
-      w80: v('wind_speed_80m', i),
-      w120: v('wind_speed_120m', i),
-      g10: v('wind_gusts_10m', i),
-      cl: v('cloud_cover_low', i),
-      vis: v('visibility', i),
+  return Array.from({ length: 24 }, (_, i) => ({
+    temp: v('temperature_2m', i),
+    pp: v('precipitation_probability', i),
+    mm: v('precipitation', i),
+    w10: v('wind_speed_10m', i),
+    w80: v('wind_speed_80m', i),
+    w120: v('wind_speed_120m', i),
+    g10: v('wind_gusts_10m', i),
+    cl: v('cloud_cover_low', i),
+    vis: v('visibility', i),
+  }))
+}
+
+const empty = (hs: HourWx[]) => hs.every((h) => h.mm == null && h.w10 == null && h.g10 == null)
+
+function parseLocation(l: OmLocation, models: { primario: string; secondo: string }): PointWx | null {
+  const first = hoursOf(l, models.primario, true)
+  const second = hoursOf(l, models.secondo, true)
+  // Se il modello principale non copre il giorno (es. oltre il suo orizzonte) vale il secondo.
+  const useSecond = empty(first)
+  if (useSecond && empty(second)) return null
+  const model = useSecond ? models.secondo : models.primario
+  const main = useSecond ? second : first
+  const alt = useSecond || empty(second) ? null : second
+  // Dati che mancano al principale (ICON-CH non ha vento a 80/120 m né visibilità): dal secondo.
+  let filled = false
+  if (!useSecond) {
+    main.forEach((h, i) => {
+      const o = second[i]
+      for (const k of ['w80', 'w120', 'vis', 'pp', 'cl', 'temp'] as const) {
+        if (h[k] == null && o[k] != null) {
+          h[k] = o[k]
+          if (k === 'w80' || k === 'w120' || k === 'vis') filled = true
+        }
+      }
     })
   }
+  const d = l.daily ?? {}
+  const pick = (k: string) => (d[`${k}_${model}`] ?? d[`${k}_${models.primario}`] ?? d[`${k}_${models.secondo}`] ?? d[k])?.[0]
   const hm = (s: string | undefined) => (s ? s.slice(11, 16) : null)
-  return { hours, sunrise: hm(l.daily?.sunrise?.[0]), sunset: hm(l.daily?.sunset?.[0]), utcOffset: l.utc_offset_seconds ?? 0 }
+  return {
+    hours: main,
+    sunrise: hm(pick('sunrise')),
+    sunset: hm(pick('sunset')),
+    utcOffset: l.utc_offset_seconds ?? 0,
+    model,
+    filledFrom: filled ? models.secondo : null,
+    alt,
+    altModel: alt ? models.secondo : null,
+  }
 }
 
 const inflight = new Map<string, Promise<void>>()
@@ -132,6 +179,8 @@ async function fetchBatch(day: string, pts: WxPoint[]): Promise<void> {
   u.searchParams.set('elevation', pts.map((p) => p.ele).join(','))
   u.searchParams.set('hourly', HOURLY.join(','))
   u.searchParams.set('daily', 'sunrise,sunset')
+  const models = modelsFor(day)
+  u.searchParams.set('models', `${models.primario},${models.secondo}`)
   u.searchParams.set('timezone', 'Europe/Rome')
   u.searchParams.set('wind_speed_unit', 'kmh')
   u.searchParams.set('start_date', day)
@@ -142,7 +191,7 @@ async function fetchBatch(day: string, pts: WxPoint[]): Promise<void> {
   const json = (await res.json()) as OmLocation | OmLocation[]
   const list = Array.isArray(json) ? json : [json]
   const at = Date.now()
-  pts.forEach((p, i) => mem.set(`${day}|${p.key}`, { at, d: list[i] ? parseLocation(list[i]) : null }))
+  pts.forEach((p, i) => mem.set(`${day}|${p.key}`, { at, d: list[i] ? parseLocation(list[i], models) : null }))
   persist()
 }
 

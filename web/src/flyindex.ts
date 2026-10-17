@@ -3,8 +3,10 @@
 // REGOLA FISSA: l'indice usa solo i LIMITI dello spazio aereo, mai quote di volo dell'utente.
 
 import {
+  INCERTEZZA,
   KP,
   LIVELLI,
+  NOME_MODELLO,
   LUCE,
   NUVOLE_BASSE,
   PESO_LEGGERO_G,
@@ -62,10 +64,10 @@ function weatherFactors(w: HourWx, profile: DroneProfile): Factor[] {
   const quota = Math.max(w.w80 ?? 0, w.w120 ?? 0, w.w10 ?? 0)
   out.push({ k: 'vento', f: ramp(quota, V.quotaBuono, V.quotaLimite), why: `vento ${Math.round(quota)} km/h in quota` })
   if (w.g10 != null) out.push({ k: 'raffiche', f: ramp(w.g10, V.raffBuono, V.raffLimite), why: `raffiche ${Math.round(w.g10)} km/h` })
+  // Pioggia: contano i mm previsti nell'ora (sotto 0,2 mm/h è asciutto); la probabilità no.
   const mm = w.mm ?? 0
-  const pp = w.pp ?? 0
-  const fRain = mm >= PIOGGIA.mmLimite ? 0 : ramp(pp, PIOGGIA.probBuona, PIOGGIA.probLimite, PIOGGIA.probMinimo)
-  out.push({ k: 'pioggia', f: fRain, why: mm >= PIOGGIA.mmLimite ? `pioggia ${mm.toLocaleString('it-IT', { maximumFractionDigits: 1 })} mm` : `pioggia probabile (${Math.round(pp)}%)` })
+  const fRain = mm < PIOGGIA.asciuttoSotto ? 1 : mm < PIOGGIA.forteDa ? PIOGGIA.debole : 0
+  out.push({ k: 'pioggia', f: fRain, why: `pioggia ${mm.toLocaleString('it-IT', { maximumFractionDigits: 1 })} mm/h` })
   if (w.cl != null) out.push({ k: 'nuvole', f: ramp(w.cl, NUVOLE_BASSE.buono, NUVOLE_BASSE.limite, NUVOLE_BASSE.minimo), why: `nuvole basse ${Math.round(w.cl)}% (nebbia)` })
   if (w.vis != null) {
     const f = w.vis >= VISIBILITA.buona ? 1 : w.vis <= VISIBILITA.limite ? 0 : (w.vis - VISIBILITA.limite) / (VISIBILITA.buona - VISIBILITA.limite)
@@ -157,6 +159,65 @@ export function summarize(hours: HourScore[]): DaySummary {
     reason = w?.why ?? (day.length ? null : 'nessuna ora di luce')
   }
   return { index, level: levelOf(index), window, reason, hours, best: bestHour?.h ?? 12 }
+}
+
+// ---------------------------------------------------------------- pioggia del giorno e accordo tra modelli
+
+const dayHours = (p: PointWx, hs: HourWx[]) => {
+  const rise = minutes(p.sunrise) ?? 6 * 60
+  const set = minutes(p.sunset) ?? 19 * 60
+  return hs.filter((_, h) => h * 60 + 30 >= rise && h * 60 + 30 < set)
+}
+
+export interface RainInfo {
+  ore: number // ore di luce con pioggia (≥ 0,2 mm/h)
+  mm: number // mm nelle ore di luce
+  probMax: number | null // probabilità massima (informazione secondaria)
+}
+
+/** Pioggia nelle ore di luce, nel punto peggiore del sentiero. */
+export function rainOfDay(points: PointWx[]): RainInfo {
+  let worst: RainInfo = { ore: 0, mm: 0, probMax: null }
+  for (const p of points) {
+    const hs = dayHours(p, p.hours)
+    const r: RainInfo = {
+      ore: hs.filter((h) => (h.mm ?? 0) >= PIOGGIA.asciuttoSotto).length,
+      mm: hs.reduce((s, h) => s + (h.mm ?? 0), 0),
+      probMax: hs.some((h) => h.pp != null) ? Math.max(...hs.map((h) => h.pp ?? 0)) : null,
+    }
+    if (r.mm > worst.mm || r.ore > worst.ore) worst = { ...r, probMax: Math.max(r.probMax ?? 0, worst.probMax ?? 0) }
+    else if (r.probMax != null) worst.probMax = Math.max(worst.probMax ?? 0, r.probMax)
+  }
+  return worst
+}
+
+export interface Agreement {
+  stato: 'buono' | 'incerto' | 'nd'
+  modelli: [string, string] | null // nomi leggibili
+  dettaglio: string | null // es. "pioggia: ICON-CH 0 mm, ECMWF 4 mm"
+}
+
+const short = (m: string) => (NOME_MODELLO[m] ?? m).replace(/ \(.*\)$/, '').replace('MeteoSwiss ', '')
+
+/** Confronto tra i due modelli nelle ore di luce: pioggia (mm e ore) e raffiche massime. */
+export function agreement(points: PointWx[]): Agreement {
+  const p = points.find((x) => x.alt && x.altModel)
+  if (!p || !p.alt || !p.altModel) return { stato: 'nd', modelli: null, dettaglio: null }
+  const a = dayHours(p, p.hours)
+  const b = dayHours(p, p.alt)
+  const mm = (hs: HourWx[]) => hs.reduce((s, h) => s + (h.mm ?? 0), 0)
+  const ore = (hs: HourWx[]) => hs.filter((h) => (h.mm ?? 0) >= PIOGGIA.asciuttoSotto).length
+  const raff = (hs: HourWx[]) => Math.max(0, ...hs.map((h) => h.g10 ?? 0))
+  const [na, nb] = [short(p.model), short(p.altModel)]
+  const fmt = (x: number) => x.toLocaleString('it-IT', { maximumFractionDigits: 1 })
+  const [ma, mb, oa, ob, ga, gb] = [mm(a), mm(b), ore(a), ore(b), raff(a), raff(b)]
+  const motivi: string[] = []
+  const secco = (x: number) => x < 0.5
+  if ((secco(ma) && mb >= INCERTEZZA.pioggiaMm) || (secco(mb) && ma >= INCERTEZZA.pioggiaMm) || Math.abs(oa - ob) >= INCERTEZZA.oreDiPioggia) {
+    motivi.push(`pioggia: ${na} ${fmt(ma)} mm, ${nb} ${fmt(mb)} mm`)
+  }
+  if (Math.abs(ga - gb) >= INCERTEZZA.raffiche) motivi.push(`raffiche: ${na} ${Math.round(ga)} km/h, ${nb} ${Math.round(gb)} km/h`)
+  return { stato: motivi.length ? 'incerto' : 'buono', modelli: [na, nb], dettaglio: motivi.join(' · ') || null }
 }
 
 export const fmtWindow = (w: [number, number]) => `${w[0]}:00–${w[1]}:00`

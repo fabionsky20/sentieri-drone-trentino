@@ -1,7 +1,7 @@
 // Meteo e indice di volabilità nella scheda del sentiero, e il bollino nelle liste.
 
-import { PROFILE_LABEL, type DroneProfile } from './flyconfig'
-import { sentence, type DaySummary } from './flyindex'
+import { NOME_MODELLO, PROFILE_LABEL, type DroneProfile } from './flyconfig'
+import { agreement, rainOfDay, sentence, type DaySummary } from './flyindex'
 import { h } from './panel'
 import { icon } from './ui'
 import type { PointWx } from './weather'
@@ -63,7 +63,7 @@ function strip(s: DaySummary, sel: number, onHour: (h: number) => void): HTMLEle
 function detailTable(points: WxPointView[], hr: number, kp: number | null): HTMLElement {
   const rows: [string, (w: PointWx) => string][] = [
     ['Temperatura', (p) => fmt(p.hours[hr].temp, ' °C')],
-    ['Pioggia', (p) => `${fmt(p.hours[hr].pp, '%')} · ${fmt(p.hours[hr].mm, ' mm', 1)}`],
+    ['Pioggia', (p) => `${fmt(p.hours[hr].mm, ' mm', 1)} · prob. ${fmt(p.hours[hr].pp, '%')}`],
     ['Vento a 10 m', (p) => fmt(p.hours[hr].w10, ' km/h')],
     ['Vento a 80 m', (p) => fmt(p.hours[hr].w80, ' km/h')],
     ['Vento a 120 m', (p) => fmt(p.hours[hr].w120, ' km/h')],
@@ -116,7 +116,34 @@ export function renderWeather(c: WeatherCtx): HTMLElement {
   )
   if (sel && !sel.night && sel.index < 60 && sel.worst) sec.append(h('p', { class: 'small wxwhy' }, icon('shield', 14), `Alle ${hr}:00 pesa: ${sel.worst.why}`))
   if (sel?.night) sec.append(h('p', { class: 'small muted' }, `Alle ${hr}:00 è buio: non si vola.`))
+  // Pioggia del giorno: ore e mm (contano per l'indice); probabilità solo come informazione.
+  const rain = rainOfDay(c.points.map((p) => p.wx))
+  const fmtMm = (x: number) => x.toLocaleString('it-IT', { maximumFractionDigits: 1 })
+  sec.append(
+    h(
+      'p',
+      { class: 'small wxrain' },
+      rain.ore ? `Pioggia nelle ore di luce: ${rain.ore} ${rain.ore === 1 ? 'ora' : 'ore'}, ${fmtMm(rain.mm)} mm` : 'Asciutto nelle ore di luce (meno di 0,2 mm/h)',
+      rain.probMax != null ? h('span', { class: 'muted' }, ` · probabilità max ${Math.round(rain.probMax)}%`) : null,
+    ),
+  )
   sec.append(detailTable(c.points, hr, sel?.kp ?? null))
+  // Modello usato e accordo tra modelli.
+  const p0w = c.points[0].wx
+  const ag = agreement(c.points.map((p) => p.wx))
+  sec.append(
+    h(
+      'div',
+      { class: `wxmodel ${ag.stato === 'incerto' ? 'uncertain' : ''}` },
+      h('p', { class: 'small' }, h('span', { class: 'muted' }, 'Modello: '), NOME_MODELLO[p0w.model] ?? p0w.model, p0w.filledFrom ? h('span', { class: 'muted' }, ` · vento in quota e visibilità da ${NOME_MODELLO[p0w.filledFrom] ?? p0w.filledFrom}`) : null),
+      ag.stato === 'incerto'
+        ? h('p', { class: 'small wxuncertain' }, icon('shield', 14), h('strong', {}, 'Previsione incerta: '), `i modelli non sono d’accordo (${ag.dettaglio}).`)
+        : ag.stato === 'buono'
+          ? h('p', { class: 'small muted' }, `Accordo tra modelli (${ag.modelli![0]} e ${ag.modelli![1]}): buono.`)
+          : h('p', { class: 'small muted' }, 'Accordo tra modelli: non disponibile per questo giorno.'),
+      h('a', { class: 'btn-link wxlink', href: 'https://www.meteotrentino.it/', target: '_blank', rel: 'noopener' }, 'Confronta su Meteotrentino ↗'),
+    ),
+  )
   const p0 = c.points[0].wx
   sec.append(h('p', { class: 'small mono wxsun' }, `Alba ${p0.sunrise ?? '–'} · Tramonto ${p0.sunset ?? '–'}`))
   if (c.drones.length > 1) {

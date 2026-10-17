@@ -35,12 +35,12 @@ export const VENTO: Record<DroneProfile, { quotaBuono: number; quotaLimite: numb
   medio: { quotaBuono: 28, quotaLimite: 45, raffBuono: 38, raffLimite: 60 },
 }
 
-/** Pioggia. I droni consumer non sono impermeabili: con pioggia vera si resta a terra. */
+/** Pioggia: conta quanta ne cade (mm nell'ora), non la probabilità (che resta solo un'informazione).
+ *  I droni consumer non sono impermeabili: con pioggia vera si resta a terra. */
 export const PIOGGIA = {
-  mmLimite: 0.3, // da qui in su nell'ora: fattore 0
-  probBuona: 20, // % di probabilità sotto cui non pesa
-  probLimite: 80, // % da cui il fattore vale `probMinimo`
-  probMinimo: 0.35,
+  asciuttoSotto: 0.2, // mm/h: sotto, l'ora conta come asciutta
+  forteDa: 0.5, // mm/h: da qui in su fattore 0
+  debole: 0.35, // fattore per pioggia debole (tra asciutto e forte)
 }
 
 /** Nuvole basse: in montagna spesso vuol dire nebbia sul sentiero. */
@@ -101,6 +101,29 @@ export const SOGLIA_MOTIVO = 60
 /** Griglia per raggruppare i punti in una sola previsione (gradi) e fasce di quota (m). */
 export const GRIGLIA_GRADI = 0.05
 export const FASCIA_QUOTA_M = 200
+
+/** Modelli meteo (Open-Meteo). Nei primi giorni MeteoSwiss ICON-CH (1–2 km, ottimo sulle Alpi,
+ *  copre il Trentino); dopo, ECMWF IFS (9 km). Il secondo modello serve per l'"accordo tra modelli"
+ *  e per i dati che il primo non ha (vento a 80/120 m e visibilità mancano in ICON-CH). */
+export const MODELLI = {
+  vicino: { primario: 'meteoswiss_icon_seamless', secondo: 'ecmwf_ifs' },
+  lontano: { primario: 'ecmwf_ifs', secondo: 'gfs_seamless' },
+}
+/** Fino a quanti giorni da oggi si usa il modello "vicino" (oggi = 0). ICON-CH arriva a ~5 giorni. */
+export const GIORNI_MODELLO_VICINO = 4
+
+export const NOME_MODELLO: Record<string, string> = {
+  meteoswiss_icon_seamless: 'MeteoSwiss ICON-CH (1–2 km)',
+  ecmwf_ifs: 'ECMWF IFS (9 km)',
+  gfs_seamless: 'NOAA GFS',
+}
+
+/** Disaccordo forte tra i due modelli nelle ore di luce → "previsione incerta". */
+export const INCERTEZZA = {
+  pioggiaMm: 2, // un modello asciutto (< 0,5 mm) e l'altro con almeno questi mm nel giorno
+  oreDiPioggia: 3, // differenza di ore di pioggia (≥ 0,2 mm/h)
+  raffiche: 20, // differenza delle raffiche massime (km/h)
+}
 
 /** Quanti giorni avanti prevede Open-Meteo (oltre: "nessuna previsione"). */
 export const GIORNI_PREVISIONE = 15
