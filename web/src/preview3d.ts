@@ -83,6 +83,21 @@ let active: (() => void) | null = null
 const DEM_URL = 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp'
 const DEM_ZOOM = 14 // massimo dettaglio di Mapterhorn sul Trentino (LiDAR PAT)
 const DEM_TILE = 512
+/** Margine minimo (m) tra la camera e il terreno più alto lì intorno (entro 60 m). */
+const CLEARANCE_M = 10
+
+/** Sorgente DEM per il terreno 3D: esattamente come la pubblica Mapterhorn (tilejson):
+ *  codifica terrarium, tile da 512 px, dettaglio fino a z14 sul Trentino. La sorgente "terrain"
+ *  dell'ombreggiatura 2D si ferma a z12 apposta (ingrandisce i tile e scarica meno dati). */
+const TERRAIN_3D = 'terrain3d'
+const TERRAIN_3D_SOURCE = {
+  type: 'raster-dem' as const,
+  tiles: [DEM_URL],
+  encoding: 'terrarium' as const,
+  tileSize: DEM_TILE,
+  maxzoom: DEM_ZOOM,
+  attribution: '<a href="https://mapterhorn.com/attribution">© Mapterhorn</a>',
+}
 
 /** Quota (m) nel punto e la massima entro `radius` metri, letta UNA volta dal tile DEM a z14
  *  (codifica terrarium: quota = R·256 + G + B/256 − 32768). null se il tile non arriva. */
@@ -166,14 +181,18 @@ export function startPreview(o: PreviewOptions): () => void {
   // e con lei quella della camera: era il "salto su e giù").
   map.setCenterClampedToGround(false)
   if (o.mobile) map.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25))
-  map.setTerrain({ source: 'terrain', exaggeration: 1 })
+  if (!map.getSource(TERRAIN_3D)) map.addSource(TERRAIN_3D, TERRAIN_3D_SOURCE)
+  map.setTerrain({ source: TERRAIN_3D, exaggeration: 1 })
   for (const hd of [map.dragPan, map.dragRotate, map.scrollZoom, map.touchZoomRotate, map.doubleClickZoom, map.keyboard, map.touchPitch, map.boxZoom]) hd.disable()
   document.body.classList.add('fly3d')
 
   // Quota del terreno: calcolata una volta sola (profilo altimetrico, poi DEM z14 appena arriva).
   let ground = o.ground
+  let around = -Infinity // terreno più alto entro 60 m
   let ready = false
-  const camAlt = () => ground + height
+  // Sempre sopra il terreno lì intorno: un pendio vicino più alto si vede come montagna, mai
+  // con la camera dentro.
+  const camAlt = () => Math.max(ground + height, around + CLEARANCE_M)
   function place(): void {
     if (!ready) return
     // Posizione e quota fisse; cambiano solo direzione (bearing) e inclinazione (pitch).
@@ -315,7 +334,12 @@ export function startPreview(o: PreviewOptions): () => void {
   document.body.append(root)
 
   function info(): void {
-    const parts = [`Terreno ${it(Math.round(ground))} m`, `drone ${height} m sopra (${it(Math.round(ground + height))} m s.l.m.)`]
+    const raised = camAlt() > ground + height + 0.5
+    const parts = [
+      `Terreno ${it(Math.round(ground))} m`,
+      `drone ${height} m sopra (${it(Math.round(camAlt()))} m s.l.m.)`,
+      ...(raised ? [`alzato a ${Math.round(camAlt() - ground)} m: pendio vicino più alto`] : []),
+    ]
     if (lookAt) parts.push(`${lookAt.nome} a ${it(distance(o.point, lookAt.lngLat) / 1000, 1)} km`)
     readout.textContent = parts.join(' · ')
   }
@@ -431,6 +455,7 @@ export function startPreview(o: PreviewOptions): () => void {
     root.remove()
     document.body.classList.remove('fly3d')
     map.setTerrain(null)
+    if (map.getSource(TERRAIN_3D)) map.removeSource(TERRAIN_3D)
     map.setCenterClampedToGround(before.clamped)
     map.setSky({ 'sky-color': '#88C6FC', 'horizon-color': '#ffffff', 'fog-color': '#ffffff', 'atmosphere-blend': 0 })
     if (map.getLayer('hillshade')) {
@@ -464,7 +489,10 @@ export function startPreview(o: PreviewOptions): () => void {
   // Prima la quota dal DEM (al massimo 4 s, altrimenti resta quella del profilo), poi la camera.
   void Promise.race([demElevation(o.point[0], o.point[1]), new Promise<null>((r) => setTimeout(() => r(null), 4000))]).then((dem) => {
     if (closed) return
-    if (dem) ground = dem.at
+    if (dem) {
+      ground = dem.at
+      around = dem.max
+    }
     ready = true
     place()
     if (rotating) loop()
