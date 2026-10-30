@@ -192,6 +192,29 @@ if (gapCase) {
   await p.context().close()
 }
 
+// 6. "Come arrivare" calcolato nel browser = quello precalcolato dalla pipeline (stessa partenza)
+{
+  const access = await get('access.json')
+  const p = await open()
+  const roadside = Object.keys(access).find((k) => access[k].inizio?.tipo === 'strada' && T.get(k)?.lunghezza_m > 2000)
+  for (const id of ['E325', roadside].filter(Boolean)) {
+    const ref = access[id]?.inizio
+    await makeRoute(p, at(id, 0.002), at(id, 0.3))
+    await p.waitForSelector('#panel-body .access a[href*="google.com/maps"]', { timeout: 15000 }).catch(() => {})
+    const href = await p.locator('#panel-body .access a[href*="google.com/maps"]').first().getAttribute('href').catch(() => null)
+    const m = href?.match(/destination=([\d.]+),([\d.]+)/)
+    if (!ref || ref.tipo === 'nessuno') {
+      check(!m, `${id}: nessun accesso, come nella pipeline`)
+      continue
+    }
+    const d = m ? dm([Number(m[2]), Number(m[1])], [ref.lon, ref.lat]) : Infinity
+    check(d < 60, `${id}: stesso punto d'arrivo in auto della pipeline (${ref.tipo}${ref.nome ? ' ' + ref.nome : ''}, scarto ${Math.round(d)} m)`)
+    await p.click('.route-bar >> text=CHIUDI').catch(() => {})
+  }
+  await p.screenshot({ path: `${OUT}/percorso_6_come_arrivare.png` })
+  await p.context().close()
+}
+
 console.log(`OK (${ok.length})`)
 for (const m of ok) console.log('  ' + m)
 console.log(`\nFALLITI (${fail.length}):`)

@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
@@ -6,7 +6,7 @@ import { defineConfig, type Plugin } from 'vite'
 // I dati prodotti dalla pipeline restano in data/processed/ (unica fonte):
 // in sviluppo vengono serviti su /data/, in build copiati in dist/data/.
 const DATA_DIR = fileURLToPath(new URL('../data/processed', import.meta.url))
-const DATA_FILE = /^[\w.-]+\.(geo)?json$/
+const DATA_FILE = /^(accesso\/)?[\w.-]+\.(geo)?json$/ // accesso/ = celle per i percorsi personalizzati
 
 function processedData(): Plugin {
   return {
@@ -25,7 +25,8 @@ function processedData(): Plugin {
       })
     },
     generateBundle() {
-      for (const name of readdirSync(DATA_DIR).filter((n) => DATA_FILE.test(n))) {
+      const names = [...readdirSync(DATA_DIR), ...(existsSync(join(DATA_DIR, 'accesso')) ? readdirSync(join(DATA_DIR, 'accesso')) : []).map((n) => `accesso/${n}`)]
+      for (const name of names.filter((n) => DATA_FILE.test(n))) {
         this.emitFile({ type: 'asset', fileName: `data/${name}`, source: readFileSync(join(DATA_DIR, name)) })
       }
     },

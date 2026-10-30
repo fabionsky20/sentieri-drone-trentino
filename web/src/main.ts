@@ -25,8 +25,9 @@ import { coverage, elevAt, nearestTrail, parseGpx, proposeFromGpx, type GpxTrack
 import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, renderWelcomeInvite, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt, projectOnLine, sliceLine } from './trailgeom'
-import { startPreview, type PreviewPoi } from './preview3d'
-import { renderAccess, type AccessData } from './access'
+import { demElevation, startPreview, type PreviewPoi } from './preview3d'
+import { nearestAccess } from './accessnear'
+import { renderAccess, type AccessData, type AccessPoint, type TrailAccess } from './access'
 import { anchorAt, buildNetwork, type Anchor, type Network, type NetworkFile } from './network'
 import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planFromDoc, planRoute, ROUTE_PREFIX, toDoc, type RouteBuild, type RouteEnd, type RoutePlan, type SavedRoute } from './routes'
 import { renderRouteBar, renderRouteInfo, type RouteStep } from './routeui'
@@ -825,7 +826,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const route = isRoute(trail.id) ? routes.get(trail.id) : undefined
   currentSave = { trailId: trail.id, box: foot }
   const accBox = h('section', { class: 'accbox' })
-  if (!route) renderAccessBox(trail, accBox)
+  renderAccessBox(trail, accBox)
   const flyBox = h('section', { class: 'flybox' })
   renderFlyBox(trail, flyBox)
   const wxBox = h('section', { class: 'wxbox' })
@@ -853,7 +854,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     mine: route ? undefined : myBox,
     weather: wxBox,
     preview: flyBox,
-    access: route ? undefined : accBox,
+    access: accBox,
     intro: route ? h('section', { class: 'routebox' }, renderRouteInfo(route.plan, piecesText(route.build.pieces, trails), routeNameField(trail.id))) : undefined,
     onZone: (ids) => select({ kind: 'zones', ids, back }),
     onPoi: (id) => select({ kind: 'poi', id, back }),
@@ -1705,10 +1706,38 @@ function drawRoute(id: string | null): void {
 let accessFrom: { trail: string; from: 'inizio' | 'fine' } = { trail: '', from: 'inizio' }
 const accessMarker = new maplibregl.Marker({ element: h('div', { class: 'access-pin', title: 'Dove arrivare in auto' }, 'P') })
 
+// Percorsi personalizzati: accesso calcolato nel browser dalla partenza e dall'arrivo (per piano).
+const routeAccess = new WeakMap<RoutePlan, Promise<TrailAccess>>()
+const routeAccessDone = new WeakMap<RoutePlan, TrailAccess>()
+
+function computeRouteAccess(plan: RoutePlan): Promise<TrailAccess> {
+  let p = routeAccess.get(plan)
+  if (!p) {
+    const one = async (pt: [number, number]): Promise<AccessPoint> => {
+      const a = await nearestAccess('data/', pt)
+      if (a.lat == null || a.lon == null) return a
+      // quote dal DEM (stesse tile dell'anteprima 3D); se non arrivano, niente dislivello
+      const [e0, e1] = await Promise.all([demElevation(pt[0], pt[1], 0), demElevation(a.lon, a.lat, 0)])
+      if (e1) a.quota = Math.round(e1.at)
+      if (e0 && e1) a.dislivello_m = Math.round(e0.at - e1.at)
+      return a
+    }
+    const end = plan.end.poi?.lngLat ?? plan.end.anchor.lngLat
+    p = Promise.all([one(plan.start.lngLat), one(end)]).then(([inizio, fine]) => {
+      const r = { inizio, fine }
+      routeAccessDone.set(plan, r)
+      return r
+    })
+    routeAccess.set(plan, p)
+  }
+  return p
+}
+
 function renderAccessBox(t: Trail, box: HTMLElement): void {
   if (accessFrom.trail !== t.id) accessFrom = { trail: t.id, from: 'inizio' }
+  const route = isRoute(t.id) ? routes.get(t.id) : undefined
   const draw = () => {
-    const a = accessData ? (accessData[t.id] ?? null) : undefined
+    const a = route ? routeAccessDone.get(route.plan) : accessData ? (accessData[t.id] ?? null) : undefined
     box.replaceChildren(
       renderAccess({
         trail: t,
@@ -1728,7 +1757,9 @@ function renderAccessBox(t: Trail, box: HTMLElement): void {
     } else accessMarker.remove()
   }
   draw()
-  if (!accessData) void getAccess().then(() => box.isConnected && draw())
+  if (route) {
+    if (!routeAccessDone.has(route.plan)) void computeRouteAccess(route.plan).then(() => box.isConnected && draw())
+  } else if (!accessData) void getAccess().then(() => box.isConnected && draw())
 }
 
 // ---- anteprima di volo 3D

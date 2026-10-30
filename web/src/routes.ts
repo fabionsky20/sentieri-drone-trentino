@@ -69,7 +69,10 @@ function gainLoss(q: number[], th = 5): [number, number] {
   return [Math.round(up), Math.round(down)]
 }
 
-const hm = (h: number) => `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`
+const hm = (h: number) => {
+  const m = Math.round(h * 60) // arrotondo i minuti totali: niente "0:60"
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
 /** Stima del tempo di cammino (4 km/h in piano, 400 m/h in salita, 800 m/h in discesa). */
 const walkTime = (km: number, up: number, down: number) => {
   const h = km / 4
@@ -232,7 +235,9 @@ export function labelOf(a: Anchor, trails: Map<string, Trail>): string {
 
 /** "E327 per 2,1 km → E343 per 3,0 km". */
 export function piecesText(pieces: Piece[], trails: Map<string, Trail>): string {
-  return pieces.map((p) => `${trails.get(p.trail)?.numero ?? p.trail} per ${(Math.abs(p.to - p.from) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`).join(' → ')
+  // pezzi di pochi metri (partenza su un incrocio, tracciati condivisi) non dicono nulla: nascosti
+  const shown = pieces.filter((p) => Math.abs(p.to - p.from) >= 50)
+  return (shown.length ? shown : pieces).map((p) => `${trails.get(p.trail)?.numero ?? p.trail} per ${(Math.abs(p.to - p.from) / 1000).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`).join(' → ')
 }
 
 // ---------------------------------------------------------------- geometria compatta (polyline)

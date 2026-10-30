@@ -9,6 +9,7 @@ di coerenza automatici. Esce con codice 1 se un controllo automatico fallisce.
 from __future__ import annotations
 
 import json
+import math
 import sys
 
 import geopandas as gpd
@@ -170,6 +171,11 @@ def main() -> int:
         e310 = acc.get("E310", {}).get("inizio", {})
         print(f"  E310 inizio (Passo Manghen): {e310.get('tipo')} {e310.get('nome', '')}, {e310.get('distanza_m')} m, dislivello {e310.get('dislivello_m')} m")
         check(e310.get("tipo") == "parcheggio" and e310.get("distanza_m", 9999) < 500, "E310: parcheggio al Passo Manghen entro 500 m")
+        # Celle per il calcolo nel browser: ogni accesso precalcolato deve stare in una cella presente.
+        cell_dir = P / "accesso"
+        cells = {f.stem for f in cell_dir.glob("*.json")} if cell_dir.exists() else set()
+        need = {f"{math.floor(a['lon'] / 0.1)}_{math.floor(a['lat'] / 0.1)}" for a in pts if "lon" in a}
+        check(bool(cells) and need <= cells, f"celle accesso/ per il browser: {len(cells)}, coprono tutti gli accessi")
 
     print("\n13. Grafo della rete (percorsi personalizzati)")
     net = json.loads((P / "network.json").read_text(encoding="utf-8"))

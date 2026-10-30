@@ -25,6 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 from pyproj import Transformer
@@ -318,6 +319,43 @@ def compute(trails) -> dict[str, dict]:
         del info["_dest"]
         out[tid][which] = {k: v for k, v in info.items() if v is not None}
     return out
+
+
+CELL_DEG = 0.1  # celle per il calcolo nel browser (percorsi personalizzati)
+
+
+def write_cells(out_dir: Path) -> dict[str, int]:
+    """data/processed/accesso/<x>_<y>.json (x = floor(lon/0,1), y = floor(lat/0,1)): parcheggi pubblici
+    e strade dove fermarsi, stessi filtri di compute(). Il browser carica le 9 celle attorno alla partenza.
+    Parcheggio: [lon, lat, nome, tariffa, posti, sosta_max]; strada: [[lon, lat], ...] (in ogni cella che tocca)."""
+    parking, roads = load()
+    f = {k: i for i, k in enumerate(parking["campi"])}
+    cells: dict[tuple[int, int], dict] = {}
+    cell = lambda x, y: cells.setdefault((x, y), {"p": [], "s": []})  # noqa: E731
+    for row in parking["dati"]:
+        if (row[f["access"]] or "").lower() in PARKING_PRIVATE:
+            continue
+        lon, lat = row[f["lon"]], row[f["lat"]]
+        cell(math.floor(lon / CELL_DEG), math.floor(lat / CELL_DEG))["p"].append(
+            [lon, lat, row[f["name"]], _fee(row[f["fee"]]), _capacity(row[f["capacity"]]), row[f["maxstay"]]])
+    for cls, coords in roads["dati"]:
+        if cls in NO_STOP:
+            continue
+        xs = [math.floor(c[0] / CELL_DEG) for c in coords]
+        ys = [math.floor(c[1] / CELL_DEG) for c in coords]
+        for x in range(min(xs), max(xs) + 1):
+            for y in range(min(ys), max(ys) + 1):
+                cell(x, y)["s"].append(coords)
+    if out_dir.exists():
+        for old in out_dir.glob("*.json"):
+            old.unlink()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    total = 0
+    for (x, y), c in cells.items():
+        path = out_dir / f"{x}_{y}.json"
+        path.write_text(json.dumps(c, ensure_ascii=False, separators=(",", ":")), encoding="utf-8", newline="\n")
+        total += path.stat().st_size
+    return {"celle": len(cells), "byte": total}
 
 
 def meta() -> dict:

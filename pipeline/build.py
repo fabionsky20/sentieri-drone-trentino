@@ -168,6 +168,8 @@ def main() -> int:
     }
     if accessi:
         sizes["access.json"] = write_json(accessi, "access.json")
+        celle = access.write_cells(config.PROCESSED / "accesso")
+        sizes[f"accesso/ ({celle['celle']} celle)"] = celle["byte"]
     sizes["network.json"] = write_json(rete, "network.json")
     pois_out = pois.drop(columns=["forma"])
     pois_out["ele"] = pois_out.ele.astype("Int64")
