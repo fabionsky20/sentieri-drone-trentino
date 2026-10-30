@@ -17,4 +17,4 @@ Thumbs.db
 .vscode/
 
 # screenshot delle prove automatiche
-web/e2e/screenshot/
+web/e2e/screenshot*/
