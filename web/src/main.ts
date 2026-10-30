@@ -27,6 +27,9 @@ import { rank } from './search'
 import { buildTrailLines, pointAt, projectOnLine, sliceLine } from './trailgeom'
 import { startPreview, type PreviewPoi } from './preview3d'
 import { renderAccess, type AccessData } from './access'
+import { anchorAt, buildNetwork, type Anchor, type Network, type NetworkFile } from './network'
+import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planRoute, ROUTE_PREFIX, type RouteBuild, type RouteEnd, type RoutePlan } from './routes'
+import { renderRouteBar, renderRouteInfo, type RouteStep } from './routeui'
 import type {
   Colore,
   FC,
@@ -203,7 +206,13 @@ const poiVisible = new Set<PoiCategory>(
   ),
 )
 let zonesOn = false
-const kmOf = (id: string): KmByColor => trailKm.get(id) ?? { verde: 0, giallo: 0, rosso: 0 }
+const kmOf = (id: string): KmByColor => trailKm.get(id) ?? (isRoute(id) ? routeKm(id) : { verde: 0, giallo: 0, rosso: 0 })
+/** Km per colore di un percorso personalizzato nella data scelta (dai tratti D-Flight attraversati). */
+function routeKm(id: string): KmByColor {
+  const k = { verde: 0, giallo: 0, rosso: 0 }
+  for (const s of trailLines.get(id)?.segs ?? []) k[eff.get(s.id)?.colore ?? 'verde'] += (s.to - s.from) / 1000
+  return k
+}
 
 // ---------------------------------------------------------------- layer
 
@@ -382,6 +391,36 @@ map.addLayer(
   },
   FIRST_LABEL,
 )
+// Percorso personalizzato: tratti colorati come i sentieri, buco e ultimo pezzo tratteggiati.
+map.addSource('route', { type: 'geojson', data: EMPTY_FC })
+map.addLayer(
+  { id: 'route-halo', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': ACCENT, 'line-opacity': 0.5, 'line-blur': 1, 'line-width': byZoom(8, 8, 12, 12, 16, 18) } },
+  FIRST_LABEL,
+)
+map.addLayer(
+  { id: 'route-casing', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': '#ffffff', 'line-width': byZoom(8, 4, 12, 7, 16, 11) } },
+  FIRST_LABEL,
+)
+map.addLayer(
+  { id: 'route-line', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': colorExpr('c'), 'line-width': byZoom(8, 2.5, 12, 4.5, 16, 7) } },
+  FIRST_LABEL,
+)
+map.addLayer({
+  id: 'route-dash',
+  type: 'line',
+  source: 'route',
+  filter: ['in', ['get', 'kind'], ['literal', ['gap', 'tail']]],
+  paint: { 'line-color': ['match', ['get', 'kind'], 'gap', '#D9480F', '#142024'] as unknown as string, 'line-width': byZoom(8, 2, 12, 3, 16, 4), 'line-dasharray': [2, 1.5] },
+})
+map.addLayer({
+  id: 'route-label',
+  type: 'symbol',
+  source: 'route',
+  // etichette come punti a metà del tratteggio: su una linea corta un'etichetta "lungo la linea" sparirebbe
+  filter: ['==', ['get', 'kind'], 'label'],
+  layout: { 'text-field': ['get', 'label'], 'text-font': LABEL_FONT, 'text-size': 12, 'text-offset': [0, -1.2], 'text-max-width': 14, 'text-allow-overlap': true },
+  paint: { 'text-color': '#142024', 'text-halo-color': '#ffffff', 'text-halo-width': 1.8 },
+})
 // La quota dei tratti gialli sta sopra tutto: è l'informazione più importante.
 map.addLayer({
   id: 'seg-label',
@@ -783,34 +822,39 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const photoPoints = line ? [0.2, 0.5, 0.8].map((f) => pointAt(line, f * line.length)) : []
   const back: Selection = { kind: 'trail', id: trail.id, seg: segId }
   const seg = segId ? segById.get(segId) : undefined
-  currentSave = { trailId: trail.id, box: foot }
+  const route = isRoute(trail.id) ? routes.get(trail.id) : undefined
+  currentSave = route ? null : { trailId: trail.id, box: foot }
   const accBox = h('section', { class: 'accbox' })
-  renderAccessBox(trail, accBox)
+  if (!route) renderAccessBox(trail, accBox)
   const flyBox = h('section', { class: 'flybox' })
   renderFlyBox(trail, flyBox)
   const wxBox = h('section', { class: 'wxbox' })
   currentWx = { trailId: trail.id, box: wxBox }
   renderWeatherBox()
   const myBox = h('section', { class: 'mybox' })
-  currentMine = { trailId: trail.id, box: myBox }
-  renderMyTrailBox(true)
+  if (!route) {
+    currentMine = { trailId: trail.id, box: myBox }
+    renderMyTrailBox(true)
+  }
   return renderTrail({
     trail,
     day,
     segment: seg ? { seg, eff: eff.get(seg.id)! } : undefined,
     trailKm: kmOf(trail.id),
-    closures: {
-      all: closures[trail.id] ?? [],
-      active: (closures[trail.id] ?? []).filter((c) => isClosedOn(c, day)),
-    },
+    // Percorso personalizzato: le chiusure dei sentieri che attraversa.
+    closures: (() => {
+      const all = route ? [...new Set(route.build.pieces.map((p) => p.trail))].flatMap((id) => closures[id] ?? []) : (closures[trail.id] ?? [])
+      return { all, active: all.filter((c) => isClosedOn(c, day)) }
+    })(),
     zones,
     pois,
     profile: profileBox,
     photos: photosSection(photoPoints, 1500),
-    mine: myBox,
+    mine: route ? undefined : myBox,
     weather: wxBox,
     preview: flyBox,
-    access: accBox,
+    access: route ? undefined : accBox,
+    intro: route ? h('section', { class: 'routebox' }, renderRouteInfo(route.plan, piecesText(route.build.pieces, trails))) : undefined,
     onZone: (ids) => select({ kind: 'zones', ids, back }),
     onPoi: (id) => select({ kind: 'poi', id, back }),
     onFit: () => fitTrail(trail),
@@ -829,6 +873,7 @@ function render(): void {
   currentWx = null
   setPick3d(null)
   accessMarker.remove()
+  drawRoute(selection?.kind === 'trail' && isRoute(selection.id) ? selection.id : null)
   wxHour = null
   // La tendina del meteo si richiude cambiando sentiero (resta com'era se si ridisegna lo stesso).
   const wxTrail = selection?.kind === 'trail' ? selection.id : null
@@ -1081,6 +1126,10 @@ function pick(it: SearchItem): void {
 map.on('click', (e) => {
   // Nell'anteprima 3D si trascina per guardare in giro: i clic non devono cambiare selezione.
   if (document.body.classList.contains('fly3d')) return
+  if (routeStep === 'start' || routeStep === 'end') {
+    void routeClick(e)
+    return
+  }
   if (pick3d) {
     pickFlyPoint(e.lngLat)
     return
@@ -1413,6 +1462,163 @@ function setWalkPreview(trailId: string, p: { from: number; to: number; at: numb
     const r = prof.lung / (line.length || 1)
     currentProfile.el.setPin({ from: p.from * r, to: p.to * r, at: p.at * r })
   }
+}
+
+// ---- percorsi personalizzati (grafo della rete SAT, calcolo nel browser)
+
+let netP: Promise<Network> | null = null
+const getNetwork = () => (netP ??= load<NetworkFile>('network.json').then(buildNetwork))
+const routes = new Map<string, { plan: RoutePlan; build: RouteBuild; name: string }>()
+let routeStep: RouteStep | null = null
+let routeStart: Anchor | null = null
+let routeSeq = 0
+const routeHost = h('div', { class: 'route-bar-host' })
+document.querySelector('.mapwrap')!.append(routeHost)
+const markA = new maplibregl.Marker({ element: h('div', { class: 'route-pin a', title: 'Partenza' }, 'A') })
+const markB = new maplibregl.Marker({ element: h('div', { class: 'route-pin b', title: 'Arrivo' }, 'B') })
+const trailBoxes = new Map(trailList.map((t) => [t.id, t.bbox]))
+
+function drawRouteBar(): void {
+  $('route-btn').setAttribute('aria-pressed', String(!!routeStep))
+  if (!routeStep) {
+    routeHost.replaceChildren()
+    return
+  }
+  routeHost.replaceChildren(
+    renderRouteBar({ step: routeStep, startLabel: routeStart ? labelOf(routeStart, trails) : null, onCancel: stopRouteMode, onNew: startRouteMode }),
+  )
+}
+
+function startRouteMode(): void {
+  routeStep = 'start'
+  routeStart = null
+  select(null)
+  markA.remove()
+  markB.remove()
+  if (mobile()) setTab('map')
+  drawRouteBar()
+  void getNetwork()
+  void getProfiles()
+}
+
+function stopRouteMode(): void {
+  routeStep = null
+  routeStart = null
+  if (!(selection?.kind === 'trail' && isRoute(selection.id))) {
+    markA.remove()
+    markB.remove()
+  }
+  drawRouteBar()
+}
+$('route-btn').addEventListener('click', () => (routeStep ? stopRouteMode() : startRouteMode()))
+
+const tapBox = (p: maplibregl.Point, tol = 10): [maplibregl.PointLike, maplibregl.PointLike] => [
+  [p.x - tol, p.y - tol],
+  [p.x + tol, p.y + tol],
+]
+
+/** Tocco su un sentiero → punto agganciato alla linea (l'arco viene spezzato lì). */
+function anchorFromTap(net: Network, e: maplibregl.MapMouseEvent): Anchor | null {
+  const hits = map.queryRenderedFeatures(tapBox(e.point), { layers: ['seg-hit'] })
+  if (!hits.length) return null
+  const seg = segById.get(nearest(hits, e.point).properties.id as string)
+  const line = seg ? trailLines.get(seg.sentiero_id) : undefined
+  if (!seg || !line) return null
+  const pr = projectOnLine(line, [e.lngLat.lng, e.lngLat.lat])
+  return anchorAt(net, seg.sentiero_id, pr.along, pr.at)
+}
+
+async function routeClick(e: maplibregl.MapMouseEvent): Promise<void> {
+  const net = await getNetwork()
+  if (routeStep === 'start') {
+    const a = anchorFromTap(net, e)
+    if (!a) {
+      showToast('Tocca la linea di un sentiero per la partenza.')
+      return
+    }
+    routeStart = a
+    markA.setLngLat(a.lngLat).addTo(map)
+    routeStep = 'end'
+    drawRouteBar()
+    return
+  }
+  if (routeStep !== 'end' || !routeStart) return
+  let end: RouteEnd | null = null
+  const poiHits = map.queryRenderedFeatures(tapBox(e.point, 8), { layers: ['poi-icons'] })
+  if (poiHits.length) {
+    const id = poiHits[0].properties.id as string
+    const c = poiCoord.get(id)
+    const info = pois.get(id)
+    const a = c ? nearestAnchor(net, trailLines, trailBoxes, c) : null
+    if (a && c && info) end = { anchor: a, poi: { id, nome: info.nome, lngLat: c } }
+  } else {
+    const a = anchorFromTap(net, e)
+    if (a) end = { anchor: a }
+  }
+  if (!end) {
+    showToast("Tocca la linea di un sentiero o una meta sulla mappa per l'arrivo.")
+    return
+  }
+  routeStep = 'calc'
+  drawRouteBar()
+  await getProfiles()
+  const plan = planRoute(net, trailLines, routeStart, end)
+  if (!plan.legs.some((l) => l.length) && !plan.gap) {
+    showToast('Partenza e arrivo coincidono: scegli un arrivo più lontano.')
+    routeStep = 'end'
+    drawRouteBar()
+    return
+  }
+  showRoute(`${ROUTE_PREFIX}${++routeSeq}`, plan, '')
+  routeStep = 'done'
+  drawRouteBar()
+}
+
+/** Registra il percorso come "sentiero sintetico" e apre la sua scheda. */
+function showRoute(id: string, plan: RoutePlan, name: string): void {
+  const build = buildRoute(id, name, plan, { trails, lines: trailLines, profiles: profilesData, pois })
+  routes.set(id, { plan, build, name })
+  trails.set(id, build.trail)
+  trailLines.set(id, build.line)
+  if (profilesData) profilesData[id] = build.profile
+  select({ kind: 'trail', id })
+  fitTrail(build.trail)
+}
+
+const itM = (m: number) => Math.round(m).toLocaleString('it-IT')
+
+function drawRoute(id: string | null): void {
+  const src = map.getSource('route') as GeoJSONSource | undefined
+  const r = id ? routes.get(id) : undefined
+  if (!r) {
+    src?.setData(EMPTY_FC)
+    if (!routeStart) {
+      markA.remove()
+      markB.remove()
+    }
+    return
+  }
+  const line = r.build.line
+  const features: GeoJSON.Feature[] = []
+  for (const s of line.segs) {
+    const coords = sliceLine(line, s.from, s.to)
+    if (coords.length > 1) features.push({ type: 'Feature', properties: { kind: 'walk', c: eff.get(s.id)?.colore ?? 'verde' }, geometry: { type: 'LineString', coordinates: coords } })
+  }
+  const { gap, tail } = r.plan
+  const mid = (a: [number, number], b: [number, number]) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  if (gap) {
+    const label = `Non collegato da sentieri SAT · ${itM(gap.meters)} m in linea d'aria`
+    features.push({ type: 'Feature', properties: { kind: 'gap', label }, geometry: { type: 'LineString', coordinates: [gap.a, gap.b] } })
+    features.push({ type: 'Feature', properties: { kind: 'label', label }, geometry: { type: 'Point', coordinates: mid(gap.a, gap.b) } })
+  }
+  if (tail) {
+    const label = `${itM(tail.meters)} m`
+    features.push({ type: 'Feature', properties: { kind: 'tail', label }, geometry: { type: 'LineString', coordinates: [tail.a, tail.b] } })
+    features.push({ type: 'Feature', properties: { kind: 'label', label }, geometry: { type: 'Point', coordinates: mid(tail.a, tail.b) } })
+  }
+  src?.setData({ type: 'FeatureCollection', features })
+  markA.setLngLat(r.plan.start.lngLat).addTo(map)
+  markB.setLngLat(r.plan.end.poi?.lngLat ?? r.plan.end.anchor.lngLat).addTo(map)
 }
 
 // ---- come arrivare (parcheggio o bordo strada, per ciascuna estremità)

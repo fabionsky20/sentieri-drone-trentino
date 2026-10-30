@@ -165,6 +165,7 @@ export interface TrailView {
   weather?: HTMLElement // meteo e volabilità, riempito da chi chiama
   preview?: HTMLElement // anteprima di volo 3D, riempito da chi chiama
   access?: HTMLElement // come arrivare in auto, riempito da chi chiama
+  intro?: HTMLElement // percorso personalizzato: tratti usati (dopo i riquadri)
   onZone: (ids: string[]) => void
   onPoi: (id: string) => void
   onFit: () => void
@@ -261,6 +262,7 @@ export function renderTrail(v: TrailView): HTMLElement {
       tile('TEMPO', hm(trail.tempo_andata), trail.tempo_ritorno ? `ritorno ${hm(trail.tempo_ritorno)}` : null),
     ),
     closureSection(v.closures),
+    v.intro ?? null,
     h(
       'section',
       {},
