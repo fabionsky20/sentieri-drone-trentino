@@ -76,7 +76,8 @@ async function frame(p, pts) {
     const m = window.__q120map
     const lon = pts.map((x) => x[0])
     const lat = pts.map((x) => x[1])
-    m.fitBounds([Math.min(...lon), Math.min(...lat), Math.max(...lon), Math.max(...lat)], { padding: 140, maxZoom: 15, duration: 0 })
+    const phone = innerWidth < 768 // sopra la scheda in basso
+    m.fitBounds([Math.min(...lon), Math.min(...lat), Math.max(...lon), Math.max(...lat)], { padding: phone ? { top: 300, bottom: 260, left: 60, right: 90 } : 140, maxZoom: 15, duration: 0 })
   }, pts)
   await p.evaluate(() => new Promise((r) => window.__q120map.once('idle', r)))
   await p.waitForTimeout(300)
@@ -117,7 +118,7 @@ async function makeRoute(p, a, b) {
   check(/PERCORSO/.test(await txt(p, '#panel-body .chiprow')) && /DIST/.test(await txt(p, '.tiles')), 'scheda come un sentiero (riquadri)')
   check(await p.locator('.profile canvas').isVisible(), 'profilo altimetrico')
   check(/Spazio aereo/i.test(await txt(p, '#panel-body')), 'spazio aereo / colori di volabilità')
-  check((await p.locator('.route-pin').count()) === 2, 'segnaposto A e B')
+  check((await p.locator('.maplibregl-marker.route-pin').count()) === 2, 'segnaposto A e B')
   const f = await routeFeatures(p)
   check(f.some((x) => x.kind === 'walk') && !f.some((x) => x.kind === 'gap'), 'percorso disegnato, nessun buco')
   await p.screenshot({ path: `${OUT}/percorso_1_stesso_sentiero.png` })
@@ -212,6 +213,110 @@ if (gapCase) {
     await p.click('.route-bar >> text=CHIUDI').catch(() => {})
   }
   await p.screenshot({ path: `${OUT}/percorso_6_come_arrivare.png` })
+  await p.context().close()
+}
+
+// 7. punti intermedi: aggiunta, inserimento tra due, riordino, eliminazione, trascinamento
+const stopsLine = async (p) => (await txt(p, '#panel-body .routestops-line')).split(' → ')
+const kmSum = async (p) => (await txt(p, '#panel-body .routepieces')).match(/[\d,]+(?= km)/g).reduce((s, x) => s + Number(x.replace(',', '.')), 0)
+async function waitStops(p, n) {
+  await p.waitForFunction((n) => (document.querySelector('#panel-body .routestops-line')?.textContent ?? '').split(' → ').length === n, n, { timeout: 15000 })
+  await p.waitForTimeout(400)
+}
+async function dragTo(p, sel, c) {
+  const box = await p.locator(sel).first().boundingBox()
+  const to = await p.evaluate((c) => {
+    const m = window.__q120map
+    const px = m.project(c)
+    const r = m.getCanvas().getBoundingClientRect()
+    return { x: px.x + r.left, y: px.y + r.top }
+  }, c)
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await p.mouse.down()
+  await p.mouse.move(to.x, to.y, { steps: 12 })
+  await p.mouse.up()
+  await p.waitForTimeout(600)
+}
+{
+  const p = await open()
+  const a = at('E310', 0.3)
+  const b = at('E322', 0.3)
+  const v1 = at('E361', 0.5)
+  const v2 = at('E310B', 0.5)
+  await makeRoute(p, a, b)
+  const km0 = await kmSum(p)
+  check((await stopsLine(p)).length === 2, 'senza punti intermedi: Partenza → Arrivo')
+  await frame(p, [a, b, v1, v2])
+  await p.click('.route-addvia')
+  await p.waitForFunction(() => /PUNTO INTERMEDIO/.test(document.querySelector('.route-bar')?.textContent ?? ''))
+  await tap(p, v1)
+  await waitStops(p, 3)
+  const km1 = await kmSum(p)
+  const s1 = await stopsLine(p)
+  check(/E361/.test(s1[1]) && km1 > km0 + 0.5, `1 punto intermedio: ${s1.join(' → ')} (${km0.toFixed(1)} → ${km1.toFixed(1)} km)`)
+  check(/E361 per [1-9]/.test(await txt(p, '#panel-body .routepieces')), `il percorso passa dal punto: ${await txt(p, '#panel-body .routepieces')}`)
+  check((await p.locator('.maplibregl-marker.route-pin').count()) === 3, 'segnaposto A, 1, B sulla mappa')
+  // inserisci tra la partenza e il punto 1
+  await p.locator('#panel-body .route-insert').first().click()
+  await p.waitForFunction(() => /PUNTO INTERMEDIO \(tra/.test(document.querySelector('.route-bar')?.textContent ?? ''))
+  await frame(p, [a, b, v1, v2])
+  await tap(p, v2)
+  await waitStops(p, 4)
+  const s2 = await stopsLine(p)
+  check(/E310B/.test(s2[1]) && /E361/.test(s2[2]), `2 punti, il nuovo inserito tra i primi due: ${s2.join(' → ')}`)
+  await p.screenshot({ path: `${OUT}/percorso_7_due_punti.png` })
+  // riordino: il punto 1 dopo il punto 2
+  await p.locator('#panel-body .routestop').nth(1).locator('button[aria-label^="Sposta"][aria-label$="dopo"]').click()
+  await p.waitForFunction((x) => (document.querySelector('#panel-body .routestops-line')?.textContent ?? '').split(' → ')[1] !== x, s2[1], { timeout: 15000 })
+  const s3 = await stopsLine(p)
+  check(s3[1] === s2[2] && s3[2] === s2[1], `riordino: ${s3.join(' → ')}`)
+  // eliminazione
+  await p.locator('#panel-body .routestop').nth(2).locator('button[aria-label^="Elimina"]').click()
+  await waitStops(p, 3)
+  const s4 = await stopsLine(p)
+  check(!s4.some((x) => /E310B/.test(x)), `eliminazione: ${s4.join(' → ')}`)
+  // trascinamento del punto 1 su un altro punto del sentiero
+  await frame(p, [a, b, v1, at('E361', 0.8)])
+  await dragTo(p, '.maplibregl-marker.route-pin.v', at('E361', 0.8))
+  await p.waitForFunction((x) => (document.querySelector('#panel-body .routestops-line')?.textContent ?? '').split(' → ')[1] !== x, s4[1], { timeout: 15000 }).catch(() => {})
+  const s5 = await stopsLine(p)
+  check(s5.length === 3 && s5[1] !== s4[1] && /E361/.test(s5[1]), `trascinamento: ${s4[1]} → ${s5[1]}`)
+  // spostando la partenza
+  await dragTo(p, '.maplibregl-marker.route-pin.a', at('E310', 0.5))
+  await p.waitForFunction((x) => (document.querySelector('#panel-body .routestops-line')?.textContent ?? '').split(' → ')[0] !== x, s5[0], { timeout: 15000 }).catch(() => {})
+  check((await stopsLine(p))[0] !== s5[0], `anche la partenza si trascina: ${(await stopsLine(p))[0]}`)
+  await p.screenshot({ path: `${OUT}/percorso_8_modificato.png` })
+  await p.context().close()
+}
+
+// 8. telefono: punto intermedio col tocco
+{
+  const p = await open('mobile')
+  const a = at('E325', 0.25)
+  const b = at('E325', 0.6)
+  const v = at('E325', 0.9)
+  await frame(p, [a, b, v])
+  await p.locator('#route-btn').tap()
+  const touch = async (c) => {
+    const xy = await p.evaluate((c) => {
+      const m = window.__q120map
+      const px = m.project(c)
+      const r = m.getCanvas().getBoundingClientRect()
+      return { x: px.x + r.left, y: px.y + r.top }
+    }, c)
+    await p.touchscreen.tap(xy.x, xy.y)
+    await p.waitForTimeout(800)
+  }
+  await touch(a)
+  await touch(b)
+  await p.waitForFunction(() => /Percorso pronto/.test(document.querySelector('.route-bar')?.textContent ?? ''), null, { timeout: 15000 })
+  await p.locator('.route-addvia').tap()
+  await frame(p, [a, b, v])
+  await touch(v)
+  await p.waitForFunction(() => (document.querySelector('#sheet .routestops-line')?.textContent ?? '').split(' → ').length === 3, null, { timeout: 15000 }).catch(() => {})
+  const line = await txt(p, '#sheet .routestops-line').catch(() => '')
+  check(line.split(' → ').length === 3, `telefono: punto intermedio aggiunto (${line})`)
+  await p.screenshot({ path: `${OUT}/percorso_9_telefono_punto.png` })
   await p.context().close()
 }
 

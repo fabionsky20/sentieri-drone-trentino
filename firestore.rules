@@ -290,9 +290,26 @@ service cloud.firestore {
         && optStr(p.get('poiNome', null), 80);
     }
 
+    // Punti intermedi (facoltativi): al massimo 10, ognuno controllato come partenza e arrivo
+    // (le regole non hanno cicli: un controllo per posizione).
+    function validTappe(l) {
+      return l is list && l.size() <= 10
+        && (l.size() < 1 || validPoint(l[0]))
+        && (l.size() < 2 || validPoint(l[1]))
+        && (l.size() < 3 || validPoint(l[2]))
+        && (l.size() < 4 || validPoint(l[3]))
+        && (l.size() < 5 || validPoint(l[4]))
+        && (l.size() < 6 || validPoint(l[5]))
+        && (l.size() < 7 || validPoint(l[6]))
+        && (l.size() < 8 || validPoint(l[7]))
+        && (l.size() < 9 || validPoint(l[8]))
+        && (l.size() < 10 || validPoint(l[9]));
+    }
+
     function validRoute(d, extra) {
       return d.keys().hasAll(['nome', 'partenza', 'arrivo', 'tratti', 'geometria', 'km', 'dplus'])
-        && d.keys().hasOnly(['nome', 'partenza', 'arrivo', 'tratti', 'geometria', 'km', 'dplus', 'buco_m'].concat(extra))
+        && d.keys().hasOnly(['nome', 'partenza', 'arrivo', 'tappe', 'tratti', 'geometria', 'km', 'dplus', 'buco_m'].concat(extra))
+        && (!('tappe' in d) || validTappe(d.tappe))
         && str(d.nome, 1, 80)
         && validPoint(d.partenza)
         && validPoint(d.arrivo)

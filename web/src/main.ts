@@ -29,8 +29,8 @@ import { demElevation, startPreview, type PreviewPoi } from './preview3d'
 import { nearestAccess } from './accessnear'
 import { renderAccess, type AccessData, type AccessPoint, type TrailAccess } from './access'
 import { anchorAt, buildNetwork, type Anchor, type Network, type NetworkFile } from './network'
-import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planFromDoc, planRoute, ROUTE_PREFIX, toDoc, type RouteBuild, type RouteEnd, type RoutePlan, type SavedRoute } from './routes'
-import { renderRouteBar, renderRouteInfo, type RouteStep } from './routeui'
+import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planEmpty, planFromDoc, planRoute, ROUTE_PREFIX, stopLabel, toDoc, type RouteBuild, type RoutePlan, type RouteStop, type SavedRoute } from './routes'
+import { renderRouteBar, renderRouteInfo, type RouteStep, type StopsCtl } from './routeui'
 import type {
   Colore,
   FC,
@@ -855,7 +855,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     weather: wxBox,
     preview: flyBox,
     access: accBox,
-    intro: route ? h('section', { class: 'routebox' }, renderRouteInfo(route.plan, piecesText(route.build.pieces, trails), routeNameField(trail.id))) : undefined,
+    intro: route ? h('section', { class: 'routebox' }, renderRouteInfo(route.plan, piecesText(route.build.pieces, trails), routeNameField(trail.id), stopsCtl(trail.id))) : undefined,
     onZone: (ids) => select({ kind: 'zones', ids, back }),
     onPoi: (id) => select({ kind: 'poi', id, back }),
     onFit: () => fitTrail(trail),
@@ -886,6 +886,8 @@ function render(): void {
     return
   }
   body.replaceChildren()
+  // Telefono, scelta di un punto intermedio: scheda bassa, la mappa resta libera per il tocco.
+  sheet.classList.toggle('picking', routeStep === 'via')
   const s = selection
   if (s.kind === 'trail') {
     body.append(trailPanel(trails.get(s.id)!, s.seg))
@@ -1127,7 +1129,7 @@ function pick(it: SearchItem): void {
 map.on('click', (e) => {
   // Nell'anteprima 3D si trascina per guardare in giro: i clic non devono cambiare selezione.
   if (document.body.classList.contains('fly3d')) return
-  if (routeStep === 'start' || routeStep === 'end') {
+  if (routeStep === 'start' || routeStep === 'end' || routeStep === 'via') {
     void routeClick(e)
     return
   }
@@ -1481,9 +1483,15 @@ let routeStart: Anchor | null = null
 let routeSeq = 0
 const routeHost = h('div', { class: 'route-bar-host' })
 document.querySelector('.mapwrap')!.append(routeHost)
+// Segnaposto della partenza mentre si sceglie l'arrivo; poi ogni tappa ha il suo (trascinabile).
 const markA = new maplibregl.Marker({ element: h('div', { class: 'route-pin a', title: 'Partenza' }, 'A') })
-const markB = new maplibregl.Marker({ element: h('div', { class: 'route-pin b', title: 'Arrivo' }, 'B') })
+let stopMarks: maplibregl.Marker[] = []
+let stopMarksPlan: RoutePlan | null = null
+// Punto intermedio in arrivo: nel percorso `id`, in posizione `index` (tra index-1 e index).
+let routeInsert: { id: string; index: number } | null = null
 const trailBoxes = new Map(trailList.map((t) => [t.id, t.bbox]))
+
+const openRouteId = () => (selection?.kind === 'trail' && isRoute(selection.id) && routes.has(selection.id) ? selection.id : null)
 
 function drawRouteBar(): void {
   $('route-btn').setAttribute('aria-pressed', String(!!routeStep))
@@ -1491,17 +1499,26 @@ function drawRouteBar(): void {
     routeHost.replaceChildren()
     return
   }
+  const ins = routeInsert ? routes.get(routeInsert.id) : undefined
+  const lbl = (i: number) => stopLabel(ins!.plan.stops[i], trails)
   routeHost.replaceChildren(
-    renderRouteBar({ step: routeStep, startLabel: routeStart ? labelOf(routeStart, trails) : null, onCancel: stopRouteMode, onNew: startRouteMode }),
+    renderRouteBar({
+      step: routeStep,
+      startLabel: routeStart ? labelOf(routeStart, trails) : null,
+      viaLabel: ins && routeInsert ? `tra ${lbl(routeInsert.index - 1)} e ${lbl(routeInsert.index)}` : undefined,
+      onCancel: () => (routeStep === 'via' ? endInsert() : stopRouteMode()),
+      onNew: startRouteMode,
+      onAddVia: openRouteId() ? () => beginInsert(openRouteId()!, routes.get(openRouteId()!)!.plan.stops.length - 1) : undefined,
+    }),
   )
 }
 
 function startRouteMode(): void {
   routeStep = 'start'
   routeStart = null
+  routeInsert = null
   select(null)
   markA.remove()
-  markB.remove()
   if (mobile()) setTab('map')
   drawRouteBar()
   void getNetwork()
@@ -1511,11 +1528,32 @@ function startRouteMode(): void {
 function stopRouteMode(): void {
   routeStep = null
   routeStart = null
-  if (!(selection?.kind === 'trail' && isRoute(selection.id))) {
-    markA.remove()
-    markB.remove()
-  }
+  routeInsert = null
+  markA.remove()
   drawRouteBar()
+  if (openRouteId()) render()
+}
+
+/** "Inserisci qui" / "+ PUNTO": il prossimo tocco sulla mappa aggiunge una tappa in `index`. */
+const MAX_TAPPE = 10 // punti intermedi, come in firestore.rules
+
+function beginInsert(id: string, index: number): void {
+  if ((routes.get(id)?.plan.stops.length ?? 0) - 2 >= MAX_TAPPE) {
+    showToast(`Al massimo ${MAX_TAPPE} punti intermedi.`)
+    return
+  }
+  routeInsert = { id, index }
+  routeStep = 'via'
+  if (mobile()) sheet.classList.remove('expanded') // scheda bassa: si vede la mappa per toccare
+  drawRouteBar()
+  render()
+}
+
+function endInsert(): void {
+  routeInsert = null
+  routeStep = openRouteId() ? 'done' : null
+  drawRouteBar()
+  render()
 }
 $('route-btn').addEventListener('click', () => (routeStep ? stopRouteMode() : startRouteMode()))
 
@@ -1535,8 +1573,38 @@ function anchorFromTap(net: Network, e: maplibregl.MapMouseEvent): Anchor | null
   return anchorAt(net, seg.sentiero_id, pr.along, pr.at)
 }
 
+/** Tocco → tappa: una meta (POI) agganciata al sentiero più vicino, oppure un punto di sentiero. */
+function stopFromTap(net: Network, e: maplibregl.MapMouseEvent): RouteStop | null {
+  const poiHits = map.queryRenderedFeatures(tapBox(e.point, 8), { layers: ['poi-icons'] })
+  if (poiHits.length) {
+    const id = poiHits[0].properties.id as string
+    const c = poiCoord.get(id)
+    const info = pois.get(id)
+    const a = c ? nearestAnchor(net, trailLines, trailBoxes, c) : null
+    if (a && c && info) return { anchor: a, poi: { id, nome: info.nome, lngLat: c } }
+  }
+  const a = anchorFromTap(net, e)
+  return a ? { anchor: a } : null
+}
+
 async function routeClick(e: maplibregl.MapMouseEvent): Promise<void> {
   const net = await getNetwork()
+  if (routeStep === 'via' && routeInsert) {
+    const s = stopFromTap(net, e)
+    if (!s) {
+      showToast('Tocca la linea di un sentiero o una meta per il punto intermedio.')
+      return
+    }
+    const { id, index } = routeInsert
+    const r = routes.get(id)
+    if (!r) return endInsert()
+    const stops = [...r.plan.stops]
+    stops.splice(index, 0, s)
+    routeInsert = null
+    routeStep = 'done'
+    await updateStops(id, stops)
+    return
+  }
   if (routeStep === 'start') {
     const a = anchorFromTap(net, e)
     if (!a) {
@@ -1550,18 +1618,7 @@ async function routeClick(e: maplibregl.MapMouseEvent): Promise<void> {
     return
   }
   if (routeStep !== 'end' || !routeStart) return
-  let end: RouteEnd | null = null
-  const poiHits = map.queryRenderedFeatures(tapBox(e.point, 8), { layers: ['poi-icons'] })
-  if (poiHits.length) {
-    const id = poiHits[0].properties.id as string
-    const c = poiCoord.get(id)
-    const info = pois.get(id)
-    const a = c ? nearestAnchor(net, trailLines, trailBoxes, c) : null
-    if (a && c && info) end = { anchor: a, poi: { id, nome: info.nome, lngLat: c } }
-  } else {
-    const a = anchorFromTap(net, e)
-    if (a) end = { anchor: a }
-  }
+  const end = stopFromTap(net, e)
   if (!end) {
     showToast("Tocca la linea di un sentiero o una meta sulla mappa per l'arrivo.")
     return
@@ -1569,16 +1626,82 @@ async function routeClick(e: maplibregl.MapMouseEvent): Promise<void> {
   routeStep = 'calc'
   drawRouteBar()
   await getProfiles()
-  const plan = planRoute(net, trailLines, routeStart, end)
-  if (!plan.legs.some((l) => l.length) && !plan.gap) {
+  const plan = planRoute(net, trailLines, [{ anchor: routeStart }, end])
+  if (planEmpty(plan)) {
     showToast('Partenza e arrivo coincidono: scegli un arrivo più lontano.')
     routeStep = 'end'
     drawRouteBar()
     return
   }
+  markA.remove()
   showRoute(`${ROUTE_PREFIX}${++routeSeq}`, plan, '')
   routeStep = 'done'
   drawRouteBar()
+}
+
+/** Nuove tappe → ricalcolo subito (tappa per tappa); se il percorso è salvato, si aggiorna anche lì. */
+async function updateStops(id: string, stops: RouteStop[]): Promise<void> {
+  const r = routes.get(id)
+  if (!r) return
+  const [net] = await Promise.all([getNetwork(), getProfiles()])
+  const plan = planRoute(net, trailLines, stops)
+  if (planEmpty(plan)) {
+    showToast('Le tappe coincidono: scegli un punto più lontano.')
+    drawRouteBar()
+    render()
+    return
+  }
+  registerRoute(id, plan, r.name, r.savedId)
+  drawRouteBar()
+  render()
+  if (r.savedId && acct?.status === 'pronto') {
+    const cur = routes.get(id)!
+    try {
+      await (await loadAccount()).saveRoute(toDoc(cur.name, cur.plan, cur.build), r.savedId)
+    } catch (e) {
+      showToast(`Modifica non salvata: ${(e as Error).message}`)
+    }
+  }
+}
+
+function moveStop(id: string, i: number, dir: -1 | 1): void {
+  const stops = [...routes.get(id)!.plan.stops]
+  const j = i + dir
+  if (j < 0 || j >= stops.length) return
+  ;[stops[i], stops[j]] = [stops[j], stops[i]]
+  void updateStops(id, stops)
+}
+
+function removeStop(id: string, i: number): void {
+  const stops = routes.get(id)!.plan.stops.filter((_, k) => k !== i)
+  if (stops.length >= 2) void updateStops(id, stops)
+}
+
+/** Segnaposto trascinato: si riaggancia al sentiero più vicino (una meta diventa punto di sentiero). */
+async function dragStop(id: string, i: number, ll: maplibregl.LngLat): Promise<void> {
+  const net = await getNetwork()
+  const a = nearestAnchor(net, trailLines, trailBoxes, [ll.lng, ll.lat])
+  const r = routes.get(id)
+  if (!a || !r) {
+    showToast('Nessun sentiero vicino: il punto torna dov\'era.')
+    stopMarksPlan = null
+    render()
+    return
+  }
+  const stops = [...r.plan.stops]
+  stops[i] = { anchor: a }
+  await updateStops(id, stops)
+}
+
+function stopsCtl(id: string): StopsCtl {
+  const r = routes.get(id)!
+  return {
+    labels: r.plan.stops.map((s) => stopLabel(s, trails)),
+    inserting: routeInsert?.id === id ? routeInsert.index : null,
+    onMove: (i, dir) => moveStop(id, i, dir),
+    onRemove: (i) => removeStop(id, i),
+    onInsert: (i) => (routeInsert?.id === id && routeInsert.index === i ? endInsert() : beginInsert(id, i)),
+  }
 }
 
 /** Registra il percorso come "sentiero sintetico" (senza aprirlo). */
@@ -1667,15 +1790,35 @@ async function openRoutePicker(id: string): Promise<void> {
 
 const itM = (m: number) => Math.round(m).toLocaleString('it-IT')
 
+function clearStopMarks(): void {
+  for (const m of stopMarks) m.remove()
+  stopMarks = []
+  stopMarksPlan = null
+}
+
+/** Segnaposto A, 1, 2…, B delle tappe: si trascinano per spostarle. */
+function drawStopMarks(id: string, plan: RoutePlan): void {
+  if (stopMarksPlan === plan) return
+  clearStopMarks()
+  stopMarksPlan = plan
+  const n = plan.stops.length
+  plan.stops.forEach((s, i) => {
+    const cls = i === 0 ? 'a' : i === n - 1 ? 'b' : 'v'
+    const tag = i === 0 ? 'A' : i === n - 1 ? 'B' : String(i)
+    const title = i === 0 ? 'Partenza' : i === n - 1 ? 'Arrivo' : `Punto ${i}`
+    const el = h('div', { class: `route-pin ${cls}`, title: `${title} · trascina per spostarlo`, 'data-stop': String(i) }, tag)
+    const mk = new maplibregl.Marker({ element: el, draggable: true }).setLngLat(s.poi?.lngLat ?? s.anchor.lngLat).addTo(map)
+    mk.on('dragend', () => void dragStop(id, i, mk.getLngLat()))
+    stopMarks.push(mk)
+  })
+}
+
 function drawRoute(id: string | null): void {
   const src = map.getSource('route') as GeoJSONSource | undefined
   const r = id ? routes.get(id) : undefined
-  if (!r) {
+  if (!r || !id) {
     src?.setData(EMPTY_FC)
-    if (!routeStart) {
-      markA.remove()
-      markB.remove()
-    }
+    clearStopMarks()
     return
   }
   const line = r.build.line
@@ -1684,21 +1827,21 @@ function drawRoute(id: string | null): void {
     const coords = sliceLine(line, s.from, s.to)
     if (coords.length > 1) features.push({ type: 'Feature', properties: { kind: 'walk', c: eff.get(s.id)?.colore ?? 'verde' }, geometry: { type: 'LineString', coordinates: coords } })
   }
-  const { gap, tail } = r.plan
   const mid = (a: [number, number], b: [number, number]) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-  if (gap) {
-    const label = `Non collegato da sentieri SAT · ${itM(gap.meters)} m in linea d'aria`
-    features.push({ type: 'Feature', properties: { kind: 'gap', label }, geometry: { type: 'LineString', coordinates: [gap.a, gap.b] } })
-    features.push({ type: 'Feature', properties: { kind: 'label', label }, geometry: { type: 'Point', coordinates: mid(gap.a, gap.b) } })
-  }
-  if (tail) {
-    const label = `${itM(tail.meters)} m`
-    features.push({ type: 'Feature', properties: { kind: 'tail', label }, geometry: { type: 'LineString', coordinates: [tail.a, tail.b] } })
-    features.push({ type: 'Feature', properties: { kind: 'label', label }, geometry: { type: 'Point', coordinates: mid(tail.a, tail.b) } })
+  for (const { gap, spur } of r.plan.stages) {
+    if (gap) {
+      const label = `Non collegato da sentieri SAT · ${itM(gap.meters)} m in linea d'aria`
+      features.push({ type: 'Feature', properties: { kind: 'gap', label }, geometry: { type: 'LineString', coordinates: [gap.a, gap.b] } })
+      features.push({ type: 'Feature', properties: { kind: 'label', label }, geometry: { type: 'Point', coordinates: mid(gap.a, gap.b) } })
+    }
+    if (spur) {
+      const label = `${itM(spur.meters)} m`
+      features.push({ type: 'Feature', properties: { kind: 'tail', label }, geometry: { type: 'LineString', coordinates: [spur.a, spur.b] } })
+      features.push({ type: 'Feature', properties: { kind: 'label', label }, geometry: { type: 'Point', coordinates: mid(spur.a, spur.b) } })
+    }
   }
   src?.setData({ type: 'FeatureCollection', features })
-  markA.setLngLat(r.plan.start.lngLat).addTo(map)
-  markB.setLngLat(r.plan.end.poi?.lngLat ?? r.plan.end.anchor.lngLat).addTo(map)
+  drawStopMarks(id, r.plan)
 }
 
 // ---- come arrivare (parcheggio o bordo strada, per ciascuna estremità)

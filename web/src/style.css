@@ -1142,6 +1142,10 @@ a {
   max-height: 92dvh;
 }
 
+.sheet.picking {
+  max-height: 22dvh;
+}
+
 .sheet-top {
   position: relative;
   display: flex;
@@ -3795,4 +3799,80 @@ a.access-go {
   gap: 4px;
   font-size: 11px;
   letter-spacing: .06em;
+}
+
+/* ---- tappe dei percorsi (punti intermedi) */
+
+.route-pin.v {
+  width: 24px;
+  height: 24px;
+  background: #fff;
+  color: var(--ink);
+  border-color: var(--ink);
+  font-size: 13px;
+}
+
+.maplibregl-marker .route-pin {
+  cursor: grab;
+}
+
+.route-pin.inline {
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  box-shadow: none;
+  flex: none;
+}
+
+.routestops-line {
+  font-weight: 600;
+}
+
+.routestops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.routestop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.routestop-name {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.routestop .iconbtn:disabled {
+  opacity: 0.3;
+}
+
+.route-insert-row {
+  padding-left: 32px;
+}
+
+.route-insert {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.route-insert[aria-pressed='true'] {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.route-addvia {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }

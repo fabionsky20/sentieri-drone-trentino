@@ -298,6 +298,7 @@ async function start(user: User): Promise<void> {
               nome: String(d.get('nome')),
               partenza: d.get('partenza'),
               arrivo: d.get('arrivo'),
+              tappe: d.get('tappe') ?? [],
               tratti: d.get('tratti') ?? [],
               geometria: String(d.get('geometria') ?? ''),
               km: Number(d.get('km') ?? 0),

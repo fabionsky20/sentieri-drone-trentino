@@ -95,13 +95,16 @@ const txt = async (p, sel) => (await p.locator(sel).first().innerText()).replace
 // ---- dispositivo 1 (PC): creo, rinomino, salvo, aggiungo a una bacheca
 const NAME = 'Giro del Manghen'
 let pieces1 = ''
+let boardPieces = ''
+let stops1 = ''
 {
   const p = await open('desktop')
   await login(p, true)
   await p.locator('#saved-close').click().catch(() => {})
   const a = at('E310', 0.3)
   const b = at('E322', 0.3)
-  await frame(p, [a, b])
+  const v = at('E361', 0.5)
+  await frame(p, [a, b, v])
   await p.click('#route-btn')
   await tap(p, a)
   await p.waitForFunction(() => /ARRIVO/.test(document.querySelector('.route-bar')?.textContent ?? ''), null, { timeout: 10000 })
@@ -123,6 +126,16 @@ let pieces1 = ''
   await p.getByRole('button', { name: /CREA E AGGIUNGI/i }).click()
   await p.waitForSelector('#modal', { state: 'hidden', timeout: 10000 })
   check(true, 'bacheca creata con il percorso')
+  boardPieces = pieces1
+  // punto intermedio su un percorso già salvato: si aggiorna anche nei miei
+  await p.click('.route-addvia')
+  await frame(p, [a, b, v])
+  await tap(p, v)
+  await p.waitForFunction(() => (document.querySelector('#panel-body .routestops-line')?.textContent ?? '').split(' → ').length === 3, null, { timeout: 15000 }).catch(async (e) => { await p.screenshot({ path: `${OUT}/debug_via.png` }); throw e })
+  pieces1 = await txt(p, '.routepieces')
+  stops1 = await txt(p, '#panel-body .routestops-line')
+  check(/E361 per [1-9]/.test(pieces1), `punto intermedio aggiunto al percorso salvato: ${stops1}`)
+  await p.waitForTimeout(1500)
   // rinomino dopo il salvataggio: il nome cambia anche nei miei
   await name.fill(`${NAME} (2)`)
   await name.press('Enter')
@@ -130,6 +143,38 @@ let pieces1 = ''
   await p.screenshot({ path: `${OUT}/salvataggio_1_pc.png` })
   await p.context().close()
 }
+
+// ---- percorso salvato con la versione precedente (senza `tappe`), scritto direttamente nell'emulatore
+const OWNER = { Authorization: 'Bearer owner', 'Content-Type': 'application/json' }
+const users = await (await fetch('http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/demo-quota120/accounts:query', { method: 'POST', headers: OWNER, body: '{}' })).json()
+const uid = users.userInfo[0].localId
+const fsValue = (v) =>
+  v === null ? { nullValue: null }
+  : v instanceof Date ? { timestampValue: v.toISOString() }
+  : Array.isArray(v) ? { arrayValue: { values: v.map(fsValue) } }
+  : typeof v === 'object' ? { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fsValue(x)])) } }
+  : typeof v === 'string' ? { stringValue: v }
+  : Number.isInteger(v) ? { integerValue: String(v) }
+  : { doubleValue: v }
+const e325 = (m) => {
+  const c = coordsOf('E325')
+  return c[Math.round((c.length - 1) * m)]
+}
+const [s0, s1] = [e325(0.1), e325(0.4)]
+const old = {
+  nome: 'Percorso vecchio',
+  partenza: { lon: s0[0], lat: s0[1], sentiero: 'E325', m: 520 },
+  arrivo: { lon: s1[0], lat: s1[1], sentiero: 'E325', m: 2080, poi: null, poiNome: null },
+  tratti: [{ s: 'E325', da: 520, a: 2080, g: 0 }],
+  geometria: '_p~iF~ps|U',
+  km: 1.56,
+  dplus: 120,
+  buco_m: null,
+  creato: new Date(Date.now() - 864e5),
+  aggiornato: new Date(Date.now() - 864e5),
+}
+const put = await fetch(`http://127.0.0.1:8080/v1/projects/demo-quota120/databases/(default)/documents/users/${uid}/percorsi/vecchio`, { method: 'PATCH', headers: OWNER, body: JSON.stringify({ fields: fsValue(old).mapValue.fields }) })
+check(put.ok, "percorso in formato vecchio scritto nell'emulatore")
 
 // ---- dispositivo 2 (telefono, nessun dato locale): lo ritrovo nei miei e nella bacheca
 {
@@ -142,6 +187,7 @@ let pieces1 = ''
   await p.waitForSelector('#sheet .routepieces', { timeout: 15000 })
   const pieces2 = await txt(p, '#sheet .routepieces')
   check(pieces2 === pieces1, `stessi tratti dopo la riapertura: ${pieces2}`)
+  check((await txt(p, '#sheet .routestops-line')) === stops1, `stesse tappe: ${stops1}`)
   check(await p.locator('#sheet .profile canvas').isVisible(), 'profilo altimetrico ricostruito')
   check(/NEI MIEI/.test(await txt(p, '#panel-foot')), 'risulta già salvato')
   await p.screenshot({ path: `${OUT}/salvataggio_2_telefono.png` })
@@ -154,8 +200,17 @@ let pieces1 = ''
   check((await txt(p, '#board-body')).includes(NAME), 'il percorso è nella bacheca')
   await p.locator('#board-body .card-main', { hasText: NAME }).first().click()
   await p.waitForSelector('#sheet .routepieces', { timeout: 15000 })
-  check((await txt(p, '#sheet .routepieces')) === pieces1, 'si apre anche dalla bacheca')
+  check((await txt(p, '#sheet .routepieces')) === boardPieces, 'si apre anche dalla bacheca (la copia di prima del punto intermedio)')
   await p.screenshot({ path: `${OUT}/salvataggio_3_bacheca.png` })
+  // il percorso vecchio (senza tappe) si apre ancora
+  await p.locator('#panel-close').click()
+  await p.locator('.tabbar [data-tab="saved"]').first().click()
+  await p.locator('#saved-body').getByText(/I miei ·/).first().click()
+  await p.locator('#saved-body .card-main', { hasText: 'Percorso vecchio' }).first().click()
+  await p.waitForSelector('#sheet .routepieces', { timeout: 15000 })
+  const oldPieces = await txt(p, '#sheet .routepieces')
+  check(/^E325 per 1,6 km$/.test(oldPieces) && (await txt(p, '#sheet .routestops-line')).split(' → ').length === 2, `percorso vecchio senza punti intermedi: ${oldPieces}`)
+  await p.screenshot({ path: `${OUT}/salvataggio_4_vecchio.png` })
   await p.context().close()
 }
 

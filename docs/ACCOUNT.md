@@ -19,7 +19,7 @@
 | `users/{uid}/notifiche/{n}` | notifiche in-app (inviti, ingressi, sentieri, ci sto, note), `letta` | solo l'utente (gli altri possono solo crearle, legate a una bacheca comune) |
 | `users/{uid}/uscite/{id}` | sentieri fatti: `sentiero`, `data`, `con` (nomi) + `conUid`, `commento`, `drone` (sì/no), `gpx_km`, `gpx_dplus`; uscite parziali: `parziale`, `partenza` (inizio/fine), `fino_m` (metri fatti da quel capo), `ar` (andata e ritorno). Senza questi campi l'uscita è completa | solo l'utente |
 | `users/{uid}/note/{sentiero}` | nota personale sul sentiero (`testo`, max 2000) | solo l'utente |
-| `users/{uid}/percorsi/{id}` | percorsi personalizzati: `nome`, `partenza`/`arrivo` (`lon`, `lat`, `sentiero`, `m`; arrivo anche `poi`, `poiNome`), `tratti` (`s`, `da`, `a`, `g`), `geometria` (encoded polyline), `km`, `dplus`, `buco_m`, `creato`, `aggiornato` | solo l'utente |
+| `users/{uid}/percorsi/{id}` | percorsi personalizzati: `nome`, `partenza`/`arrivo` (`lon`, `lat`, `sentiero`, `m`; arrivo anche `poi`, `poiNome`), `tappe` (facoltativo: punti intermedi, max 10, stesso formato dell'arrivo), `tratti` (`s`, `da`, `a`, `g`), `geometria` (encoded polyline), `km`, `dplus`, `buco_m`, `creato`, `aggiornato` | solo l'utente |
 | `users/{uid}/amici/{uid}` | amici entrati con il mio link: `nome`, `avatar`, `entrato` | solo l'utente (li scrive l'invitato mentre crea il profilo, solo con il codice giusto) |
 | `codiciInvito/{codice}` | link "Invita amici": `uid` e `nome` di chi invita | chiunque abbia il codice (anche senza login), nessun elenco |
 | `profili/{uid}` | rubrica per la ricerca per nome: `nome`, `avatar` | utenti con login; si toglie con "Visibile nella ricerca" nel profilo |
@@ -59,7 +59,14 @@ Dal passo B è in sola lettura. Nei Salvati i membri storici vedono il pulsante 
 
 ## Regole di sicurezza
 
-Il file [`firestore.rules`](../firestore.rules) è la copia di riferimento. **Va pubblicato a mano** nella console:
+Il file [`firestore.rules`](../firestore.rules) è la copia di riferimento. **Da terminale** (login una volta sola per computer con `npx firebase login`; `.firebaserc` indica il progetto):
+
+```
+cd firebase-test
+npx firebase deploy --only firestore:rules --config ../firebase.json --project sentieri-e-drone
+```
+
+Oppure a mano nella console:
 
 1. https://console.firebase.google.com → progetto **sentieri-e-drone** → *Build* → **Firestore Database** → scheda **Regole**.
 2. Seleziona tutto il testo e sostituiscilo con il contenuto di `firestore.rules` (su GitHub: apri il file → pulsante *Copy raw file*).

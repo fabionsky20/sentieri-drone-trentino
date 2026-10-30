@@ -2,42 +2,73 @@
 // profilo) così la scheda, il profilo, il meteo, i POI e l'anteprima 3D funzionano uguali.
 
 import { anchorAt as anchorAtFn, componentOf, closestPair, mergePieces, metersBetween, nearestAnchor, shortestPath, type Anchor, type Network, type Piece } from './network'
-import { pointAt as pointAtLine, sliceLine, type TrailLine } from './trailgeom'
+import { sliceLine, type TrailLine } from './trailgeom'
 import type { PoiProps, Profile, Trail, TrailPoi } from './types'
 
 export const ROUTE_PREFIX = 'percorso:'
 export const isRoute = (id: string) => id.startsWith(ROUTE_PREFIX)
 
-/** Dove finisce il percorso: un punto di sentiero oppure una meta (POI) fuori sentiero. */
-export interface RouteEnd {
+/** Una tappa del percorso (partenza, punto intermedio, arrivo): un punto di sentiero, oppure una
+ *  meta (POI) fuori sentiero agganciata al punto di sentiero più vicino. */
+export interface RouteStop {
   anchor: Anchor
   poi?: { id: string; nome: string; lngLat: [number, number] }
 }
+export type RouteEnd = RouteStop
+
+/** Pezzo in linea retta: "buco" tra reti non collegate o deviazione fino a una meta fuori sentiero. */
+export interface StraightSeg {
+  a: [number, number]
+  b: [number, number]
+  meters: number
+}
+
+/** Da una tappa alla successiva. */
+export interface RouteStage {
+  legs: Piece[][] // 1 tratto continuo, o 2 se le reti non sono collegate
+  gap?: StraightSeg // "buco" non coperto da sentieri SAT
+  spur?: StraightSeg // dal sentiero fino alla meta della tappa d'arrivo (se è fuori sentiero)
+}
 
 export interface RoutePlan {
-  start: Anchor
-  end: RouteEnd
-  legs: Piece[][] // 1 tratto continuo, o 2 se le reti non sono collegate
-  gap?: { a: [number, number]; b: [number, number]; meters: number } // "buco" non coperto da sentieri SAT
-  tail?: { a: [number, number]; b: [number, number]; meters: number } // ultimo pezzo fino alla meta
+  stops: RouteStop[] // almeno 2: partenza, intermedi, arrivo
+  stages: RouteStage[] // stops.length - 1
+  start: Anchor // = stops[0].anchor
+  end: RouteStop // = ultima tappa
 }
 
-/** Calcola il percorso: più breve sul grafo; se le reti non sono collegate, due mezzi percorsi
- *  verso la coppia di punti più vicini e il "buco" in mezzo. */
-export function planRoute(net: Network, lines: Map<string, TrailLine>, start: Anchor, end: RouteEnd): RoutePlan {
-  const ca = componentOf(net, start)
-  const cb = componentOf(net, end.anchor)
-  const tail = end.poi && metersBetween(end.anchor.lngLat, end.poi.lngLat) > 15 ? { a: end.anchor.lngLat, b: end.poi.lngLat, meters: metersBetween(end.anchor.lngLat, end.poi.lngLat) } : undefined
+const spurOf = (s: RouteStop): StraightSeg | undefined =>
+  s.poi && metersBetween(s.anchor.lngLat, s.poi.lngLat) > 15 ? { a: s.anchor.lngLat, b: s.poi.lngLat, meters: metersBetween(s.anchor.lngLat, s.poi.lngLat) } : undefined
+
+/** Più breve sul grafo tra due punti; se le reti non sono collegate, due mezzi percorsi verso la
+ *  coppia di punti più vicini e il "buco" in mezzo. */
+function planStage(net: Network, lines: Map<string, TrailLine>, from: Anchor, to: RouteStop): RouteStage {
+  const spur = spurOf(to)
+  const ca = componentOf(net, from)
+  const cb = componentOf(net, to.anchor)
   if (ca === cb) {
-    const p = shortestPath(net, start, end.anchor)
-    if (p) return { start, end, legs: [p.pieces], tail }
+    const p = shortestPath(net, from, to.anchor)
+    if (p) return { legs: [p.pieces], spur }
   }
   const pair = closestPair(net, lines, ca, cb)
-  if (!pair) return { start, end, legs: [], tail }
-  const first = shortestPath(net, start, pair.a)
-  const second = shortestPath(net, pair.b, end.anchor)
-  return { start, end, legs: [first?.pieces ?? [], second?.pieces ?? []], gap: { a: pair.a.lngLat, b: pair.b.lngLat, meters: pair.meters }, tail }
+  if (!pair) return { legs: [], spur }
+  const first = shortestPath(net, from, pair.a)
+  const second = shortestPath(net, pair.b, to.anchor)
+  return { legs: [first?.pieces ?? [], second?.pieces ?? []], gap: { a: pair.a.lngLat, b: pair.b.lngLat, meters: pair.meters }, spur }
 }
+
+/** Calcola il percorso tappa per tappa (il più breve tra una tappa e la successiva), poi le unisce. */
+export function planRoute(net: Network, lines: Map<string, TrailLine>, stops: RouteStop[]): RoutePlan {
+  const stages = stops.slice(1).map((s, i) => planStage(net, lines, stops[i].anchor, s))
+  return { stops, stages, start: stops[0].anchor, end: stops[stops.length - 1] }
+}
+
+/** Tutti i pezzi di sentiero in ordine. */
+export const planPieces = (plan: RoutePlan): Piece[] => plan.stages.flatMap((s) => s.legs.flat())
+/** Percorso vuoto (tappe coincidenti). */
+export const planEmpty = (plan: RoutePlan) => !plan.stages.some((s) => s.gap || s.legs.some((l) => l.some((p) => Math.abs(p.to - p.from) > 1)))
+/** Nome della tappa: la meta, o "km 3,2 di E325" / località. */
+export const stopLabel = (s: RouteStop, trails: Map<string, Trail>) => s.poi?.nome ?? labelOf(s.anchor, trails)
 
 /** Ricalcolo da tratti salvati (se i sentieri esistono ancora con la stessa lunghezza). */
 export function piecesValid(pieces: Piece[], lines: Map<string, TrailLine>): boolean {
@@ -153,23 +184,24 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
     pos += hi - lo
     walked += hi - lo
   }
-  plan.legs.forEach((leg, i) => {
-    if (i > 0 && plan.gap) {
-      // buco: linea dritta (non camminata su sentiero SAT), quota interpolata
-      const qa = q[q.length - 1]
-      push([plan.gap.a, plan.gap.b])
-      const n = Math.max(1, Math.round(plan.gap.meters / STEP))
-      const first = leg[0]
-      const qb = first ? elevAt(c.profiles?.[first.trail], first.from, c.lines.get(first.trail)?.length ?? 1) : null
-      for (let k = 1; k < n; k++) if (qa != null && qb != null) q.push(qa + ((qb - qa) * k) / n)
-      pos += plan.gap.meters
-    }
-    for (const p of leg) addPiece(p)
+  plan.stages.forEach((stage, si) => {
+    stage.legs.forEach((leg, i) => {
+      if (i > 0 && stage.gap) {
+        // buco: linea dritta (non camminata su sentiero SAT), quota interpolata
+        const qa = q[q.length - 1]
+        push([stage.gap.a, stage.gap.b])
+        const n = Math.max(1, Math.round(stage.gap.meters / STEP))
+        const first = leg[0]
+        const qb = first ? elevAt(c.profiles?.[first.trail], first.from, c.lines.get(first.trail)?.length ?? 1) : null
+        for (let k = 1; k < n; k++) if (qa != null && qb != null) q.push(qa + ((qb - qa) * k) / n)
+        pos += stage.gap.meters
+      }
+      for (const p of leg) addPiece(p)
+    })
+    // meta della tappa (anche intermedia) tra i POI del percorso
+    const stop = plan.stops[si + 1]
+    if (stop.poi && !poi.some((x) => x.id === stop.poi!.id)) poi.push({ id: stop.poi.id, d: Math.round(stage.spur?.meters ?? 0), km: Math.round((pos / 1000) * 100) / 100 })
   })
-  if (plan.end.poi) {
-    const inList = poi.find((x) => x.id === plan.end.poi!.id)
-    if (!inList) poi.push({ id: plan.end.poi.id, d: Math.round(plan.tail?.meters ?? 0), km: Math.round((pos / 1000) * 100) / 100 })
-  }
   // TrailLine del percorso (cum geodetico come in trailgeom.buildTrailLines)
   const cum = [0]
   const R = 6_371_008.8
@@ -188,9 +220,9 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
   const usedTrails = [...used].map((x) => c.trails.get(x)).filter((x): x is Trail => !!x)
   const diff = usedTrails.map((t) => t.difficolta).reduce<string | null>((a, b) => (diffRank(b) > diffRank(a) ? b : a), null)
   const startLbl = labelOf(plan.start, c.trails)
-  const endLbl = plan.end.poi?.nome ?? labelOf(plan.end.anchor, c.trails)
+  const endLbl = stopLabel(plan.end, c.trails)
   const km = walked / 1000
-  const allPieces = mergePieces(plan.legs.flat())
+  const allPieces = mergePieces(planPieces(plan))
   const trail: Trail = {
     id,
     numero: 'PERCORSO',
@@ -294,11 +326,21 @@ export function decodePolyline(s: string): [number, number][] {
 
 /** Percorso salvato: abbastanza per ridisegnarlo (geometria) e per ricalcolarlo se i sentieri SAT
  *  cambiano (tratti usati + partenza e arrivo). Nessun dato di volo. */
+export interface RoutePoint {
+  lon: number
+  lat: number
+  sentiero: string
+  m: number
+  poi?: string | null
+  poiNome?: string | null
+}
+
 export interface RouteDoc {
   nome: string
-  partenza: { lon: number; lat: number; sentiero: string; m: number }
-  arrivo: { lon: number; lat: number; sentiero: string; m: number; poi?: string | null; poiNome?: string | null }
-  tratti: { s: string; da: number; a: number; g: number }[] // g = pezzo (0, o 1 dopo il buco)
+  partenza: RoutePoint
+  arrivo: RoutePoint
+  tappe?: RoutePoint[] // punti intermedi in ordine (assente nei percorsi salvati prima)
+  tratti: { s: string; da: number; a: number; g: number }[] // g = tratto continuo (cambia dopo ogni buco)
   geometria: string // encoded polyline
   km: number
   dplus: number
@@ -315,49 +357,52 @@ export interface SavedRoute extends RouteDoc {
 const r1 = (v: number) => Math.round(v * 10) / 10
 const r5 = (v: number) => Math.round(v * 1e5) / 1e5
 
+function toPoint(s: RouteStop, withPoi: boolean): RoutePoint {
+  const a = s.anchor
+  const p: RoutePoint = { lon: r5(a.lngLat[0]), lat: r5(a.lngLat[1]), sentiero: a.trail, m: r1(a.m) }
+  return withPoi ? { ...p, poi: s.poi?.id ?? null, poiNome: s.poi?.nome.slice(0, 80) ?? null } : p
+}
+
 export function toDoc(name: string, plan: RoutePlan, build: RouteBuild): RouteDoc {
-  const s = plan.start
-  const e = plan.end
+  const tratti: RouteDoc['tratti'] = []
+  let g = 0
+  for (const st of plan.stages) {
+    st.legs.forEach((leg, i) => {
+      if (i > 0) g++ // dopo un buco
+      for (const p of leg) tratti.push({ s: p.trail, da: r1(p.from), a: r1(p.to), g })
+    })
+  }
+  const gaps = plan.stages.reduce((sum, s) => sum + (s.gap?.meters ?? 0), 0)
   return {
     nome: (name || build.trail.titolo).slice(0, 80),
-    partenza: { lon: r5(s.lngLat[0]), lat: r5(s.lngLat[1]), sentiero: s.trail, m: r1(s.m) },
-    arrivo: { lon: r5(e.anchor.lngLat[0]), lat: r5(e.anchor.lngLat[1]), sentiero: e.anchor.trail, m: r1(e.anchor.m), poi: e.poi?.id ?? null, poiNome: e.poi?.nome.slice(0, 80) ?? null },
-    tratti: plan.legs.flatMap((leg, g) => leg.map((p) => ({ s: p.trail, da: r1(p.from), a: r1(p.to), g }))),
+    partenza: toPoint(plan.stops[0], false),
+    arrivo: toPoint(plan.end, true),
+    tappe: plan.stops.slice(1, -1).map((s) => toPoint(s, true)),
+    tratti,
     geometria: encodePolyline(build.line.coords),
     km: Math.round(build.walkedM / 10) / 100,
     dplus: build.trail.dislivello_pos ?? 0,
-    buco_m: plan.gap ? Math.round(plan.gap.meters) : null,
+    buco_m: gaps ? Math.round(gaps) : null,
   }
 }
 
-/** Ricostruisce il piano da un percorso salvato: dai tratti se i sentieri ci sono ancora
- *  (stessa lunghezza), altrimenti ricalcolato da partenza e arrivo sul grafo attuale. */
+/** Ricostruisce il piano da un percorso salvato, tappa per tappa (partenza, `tappe` se ci sono,
+ *  arrivo) sul grafo attuale; i percorsi salvati senza `tappe` funzionano uguale. `ricalcolato` =
+ *  i tratti salvati non esistono più (shapefile SAT cambiato) e il percorso è diverso: l'app lo dice. */
 export function planFromDoc(d: RouteDoc, net: Network, lines: Map<string, TrailLine>, bboxes: Map<string, [number, number, number, number]>, poiCoord: Map<string, [number, number]>): { plan: RoutePlan; ricalcolato: boolean } | null {
-  const pieces = d.tratti.map((t) => ({ trail: t.s, from: t.da, to: t.a }))
-  const poiLL = d.arrivo.poi ? poiCoord.get(d.arrivo.poi) : undefined
-  const anchorFor = (p: { lon: number; lat: number; sentiero: string; m: number }) =>
-    (lines.has(p.sentiero) && net.byTrail.has(p.sentiero) ? anchorAtSafe(net, p) : null) ?? nearestAnchor(net, lines, bboxes, [p.lon, p.lat])
-  const start = anchorFor(d.partenza)
-  const endA = anchorFor(d.arrivo)
-  if (!start || !endA) return null
-  const end: RouteEnd = { anchor: endA, poi: d.arrivo.poi && poiLL ? { id: d.arrivo.poi, nome: d.arrivo.poiNome ?? 'Meta', lngLat: poiLL } : undefined }
-  if (pieces.length && piecesValid(pieces, lines)) {
-    const legs: Piece[][] = []
-    for (const t of d.tratti) (legs[t.g] ??= []).push({ trail: t.s, from: t.da, to: t.a })
-    const at = (p: Piece, which: 'from' | 'to'): [number, number] => {
-      const l = lines.get(p.trail)!
-      return pointAtLine(l, p[which])
-    }
-    let gap: RoutePlan['gap']
-    if (legs.length > 1 && legs[0]?.length && legs[1]?.length) {
-      const a = at(legs[0][legs[0].length - 1], 'to')
-      const b = at(legs[1][0], 'from')
-      gap = { a, b, meters: metersBetween(a, b) }
-    }
-    const tail = end.poi && metersBetween(endA.lngLat, end.poi.lngLat) > 15 ? { a: endA.lngLat, b: end.poi.lngLat, meters: metersBetween(endA.lngLat, end.poi.lngLat) } : undefined
-    return { plan: { start, end, legs: legs.map((l) => l ?? []), gap, tail }, ricalcolato: false }
+  const anchorFor = (p: RoutePoint) => (lines.has(p.sentiero) && net.byTrail.has(p.sentiero) ? anchorAtSafe(net, p) : null) ?? nearestAnchor(net, lines, bboxes, [p.lon, p.lat])
+  const stops: RouteStop[] = []
+  for (const p of [d.partenza, ...(d.tappe ?? []), d.arrivo]) {
+    const anchor = anchorFor(p)
+    if (!anchor) return null
+    const ll = p.poi ? poiCoord.get(p.poi) : undefined
+    stops.push({ anchor, poi: p.poi && ll ? { id: p.poi, nome: p.poiNome ?? 'Meta', lngLat: ll } : undefined })
   }
-  return { plan: planRoute(net, lines, start, end), ricalcolato: true }
+  const plan = planRoute(net, lines, stops)
+  const now = planPieces(plan)
+  const same = now.length === d.tratti.length && now.every((p, k) => p.trail === d.tratti[k].s && Math.abs(p.from - d.tratti[k].da) < 3 && Math.abs(p.to - d.tratti[k].a) < 3)
+  const stillThere = piecesValid(d.tratti.map((x) => ({ trail: x.s, from: x.da, to: x.a })), lines)
+  return { plan, ricalcolato: !same && !stillThere }
 }
 
 function anchorAtSafe(net: Network, p: { lon: number; lat: number; sentiero: string; m: number }): Anchor | null {
