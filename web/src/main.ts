@@ -45,6 +45,7 @@ import type {
   ZoneProps,
 } from './types'
 import { hydrateIcons, icon } from './ui'
+import { HIGHLIGHT } from './highlight'
 
 /** Colori degli stati di volo (usati solo per il volo). */
 const COLORS: Record<Colore, string> = { verde: '#2FBF71', giallo: '#E9AE0B', rosso: '#E5484D' }
@@ -314,18 +315,6 @@ const ZOOMS = [8, 10, 12, 14, 17]
 const LINE_W = [1.5, 2.1, 3.2, 4.6, 7]
 const widths = (extra: number[] = [0, 0, 0, 0, 0]) => ZOOMS.flatMap((z, i) => [z, LINE_W[i] + extra[i]])
 const round = { 'line-cap': 'round', 'line-join': 'round' } as const
-// Alone del sentiero selezionato.
-map.addLayer(
-  {
-    id: 'seg-sel',
-    type: 'line',
-    source: 'segments',
-    filter: ['==', ['get', 'sentiero_id'], ''],
-    layout: round,
-    paint: { 'line-color': ACCENT, 'line-opacity': 0.55, 'line-blur': 1, 'line-width': byZoom(...widths([7, 8, 10, 12, 14])) },
-  },
-  FIRST_LABEL,
-)
 map.addLayer(
   {
     id: 'seg-shadow',
@@ -361,6 +350,21 @@ map.addLayer(
   },
   FIRST_LABEL,
 )
+// Sentiero aperto: linea spessa nel colore di evidenziazione con bordo bianco, sopra tutti gli
+// altri e sopra le zone; al centro un filo col colore del volo, per non perdere la volabilità.
+const SEL_NONE = ['==', ['get', 'sentiero_id'], ''] as maplibregl.FilterSpecification
+map.addLayer(
+  { id: 'seg-sel-casing', type: 'line', source: 'segments', filter: SEL_NONE, layout: round, paint: { 'line-color': '#ffffff', 'line-width': byZoom(...widths([6, 7, 8.5, 10, 12])) } },
+  FIRST_LABEL,
+)
+map.addLayer(
+  { id: 'seg-sel', type: 'line', source: 'segments', filter: SEL_NONE, layout: round, paint: { 'line-color': HIGHLIGHT, 'line-width': byZoom(...widths([3, 3.5, 4.5, 5.5, 7])) } },
+  FIRST_LABEL,
+)
+map.addLayer(
+  { id: 'seg-sel-core', type: 'line', source: 'segments', filter: SEL_NONE, layout: round, paint: { 'line-color': colorExpr('c'), 'line-width': byZoom(8, 0.8, 12, 1.4, 14, 2, 17, 3) } },
+  FIRST_LABEL,
+)
 // Parti fatte dei sentieri (anche solo fin dove si è arrivati): puntinato scuro sopra il colore.
 // La geometria si ritaglia nel browser dalle uscite; si spegne dai filtri.
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
@@ -394,16 +398,17 @@ map.addLayer(
 )
 // Percorso personalizzato: tratti colorati come i sentieri, buco e ultimo pezzo tratteggiati.
 map.addSource('route', { type: 'geojson', data: EMPTY_FC })
+// Stessa evidenziazione del sentiero aperto: violetto con bordo bianco e filo del colore del volo.
 map.addLayer(
-  { id: 'route-halo', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': ACCENT, 'line-opacity': 0.5, 'line-blur': 1, 'line-width': byZoom(8, 8, 12, 12, 16, 18) } },
+  { id: 'route-casing', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': '#ffffff', 'line-width': byZoom(8, 6, 12, 9, 16, 14) } },
   FIRST_LABEL,
 )
 map.addLayer(
-  { id: 'route-casing', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': '#ffffff', 'line-width': byZoom(8, 4, 12, 7, 16, 11) } },
+  { id: 'route-line', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': HIGHLIGHT, 'line-width': byZoom(8, 3.5, 12, 5.5, 16, 9) } },
   FIRST_LABEL,
 )
 map.addLayer(
-  { id: 'route-line', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': colorExpr('c'), 'line-width': byZoom(8, 2.5, 12, 4.5, 16, 7) } },
+  { id: 'route-core', type: 'line', source: 'route', filter: ['==', ['get', 'kind'], 'walk'], layout: round, paint: { 'line-color': colorExpr('c'), 'line-width': byZoom(8, 0.8, 12, 1.4, 16, 2.6) } },
   FIRST_LABEL,
 )
 map.addLayer({
@@ -867,7 +872,8 @@ function render(): void {
   setWalkPreview('', null)
   currentProfile = null
   const trailId = selection?.kind === 'trail' ? selection.id : ''
-  map.setFilter('seg-sel', ['==', ['get', 'sentiero_id'], trailId])
+  for (const id of ['seg-sel-casing', 'seg-sel', 'seg-sel-core']) map.setFilter(id, ['==', ['get', 'sentiero_id'], trailId])
+  setFocus(trailId || null)
   map.setFilter('zone-sel', ['in', ['get', 'zona_id'], ['literal', selection?.kind === 'zones' ? selection.ids : []]])
   map.setFilter('poi-sel', ['==', ['get', 'id'], selection?.kind === 'poi' ? selection.id : ''])
   currentMine = null
@@ -2183,6 +2189,19 @@ function renderWeatherBox(): void {
 
 /** Colori della mappa: spazio aereo (default) oppure volabilità del giorno. */
 const LINE_COLOR_AIR = colorExpr('c')
+
+/** Con un sentiero o percorso aperto gli altri sentieri si attenuano (restano visibili); chiudendo
+ *  la scheda tutto torna normale. Si somma all'attenuazione dei filtri (feature-state "off"). */
+let focusId: string | null = null
+function setFocus(id: string | null): void {
+  if (id === focusId) return
+  focusId = id
+  const op = (on: number, off: number, other: number) =>
+    (id ? ['case', ['==', ['get', 'sentiero_id'], id], on, ['boolean', ['feature-state', 'off'], false], off, other] : dimmed(on, off)) as unknown as number
+  map.setPaintProperty('seg-line', 'line-opacity', op(1, 0.2, 0.45))
+  map.setPaintProperty('seg-casing', 'line-opacity', op(1, 0.25, 0.4))
+  map.setPaintProperty('seg-shadow', 'line-opacity', op(0.28, 0.04, 0.06))
+}
 const LINE_COLOR_VOL = [
   'case',
   ['<', ['coalesce', ['feature-state', 'vol'], -1], 0],
@@ -2199,6 +2218,7 @@ function paintVolMap(): void {
   if (!filters.coloraVol) {
     if (volPainted) {
       map.setPaintProperty('seg-line', 'line-color', LINE_COLOR_AIR)
+      map.setPaintProperty('seg-sel-core', 'line-color', LINE_COLOR_AIR)
       setLegend(false)
       volPainted = false
     }
@@ -2218,6 +2238,7 @@ function paintVolMap(): void {
   }
   if (!volPainted) {
     map.setPaintProperty('seg-line', 'line-color', LINE_COLOR_VOL)
+    map.setPaintProperty('seg-sel-core', 'line-color', LINE_COLOR_VOL)
     setLegend(true)
     volPainted = true
   }

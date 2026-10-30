@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "e2e": "node e2e/scheda.mjs && node e2e/percorsi.mjs",
+    "e2e": "node e2e/scheda.mjs && node e2e/percorsi.mjs && node e2e/vista3d.mjs",
     "e2e:salvataggio": "node e2e/salvataggio.mjs"
   },
   "dependencies": {

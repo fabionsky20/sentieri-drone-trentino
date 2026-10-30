@@ -1,6 +1,7 @@
 // Profilo altimetrico su canvas, colorato come i tratti (verde/giallo/rosso nella data scelta),
 // con i POI lungo il percorso e lettura al passaggio del dito o del mouse.
 
+import { HIGHLIGHT } from './highlight'
 import { CATEGORIES } from './icons'
 import { kmNum } from './panel'
 import type { PoiCategory, Profile } from './types'
@@ -100,12 +101,14 @@ export function renderProfile(input: ProfileInput): ProfileEl {
       c.fillStyle = r.color
       c.fill(area)
       c.globalAlpha = 1
-      c.strokeStyle = r.color
-      c.lineWidth = 2.2
-      c.lineJoin = 'round'
-      c.stroke(path)
       c.restore()
     }
+    // Linea del profilo nel colore di evidenziazione (come il sentiero aperto sulla mappa);
+    // sotto, l'area resta colorata tratto per tratto con il colore del volo.
+    c.strokeStyle = HIGHLIGHT
+    c.lineWidth = 2.4
+    c.lineJoin = 'round'
+    c.stroke(path)
 
     // POI lungo il percorso: pallini colorati in alto.
     for (const p of input.pois) {
