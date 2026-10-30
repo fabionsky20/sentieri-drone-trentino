@@ -285,6 +285,20 @@ In `meta.json`: `accesso` = data, attribuzione, numero di parcheggi e strade.
 Limiti: la distanza a piedi è in linea d'aria (nessun calcolo di percorso); il punto stradale più vicino
 può stare oltre una cresta, per questo l'app mostra distanza e dislivello e il punto sulla mappa.
 
+## 8. Grafo della rete (`pipeline/network.py` → `network.json`)
+
+Per i percorsi personalizzati calcolati nel browser. Dallo shapefile SAT (una linea per sentiero):
+- **nodi**: estremi dei sentieri, incroci, innesti a T (estremo di un sentiero che tocca un altro a metà),
+  inizio/fine dei tratti in comune tra due sentieri; i punti più vicini di `config.RETE_TOLLERANZA_M`
+  (15 m) diventano un nodo solo (union-find su STRtree);
+- **archi**: pezzo di un sentiero tra due nodi consecutivi.
+
+Formato: `{"tolleranza_m": 15, "nodi": [[lon, lat, componente], …], "archi": [[nodo_a, nodo_b, sentiero_id, da_m, a_m, d_pos, d_neg], …]}`.
+`da_m`/`a_m` sono metri lungo la linea SAT (stessa scala di `profiles.json` e dei tratti): la geometria
+dell'arco si ritaglia dalla linea del sentiero, non è duplicata. `d_pos`/`d_neg` dal DEM con isteresi, nel
+verso da `da_m` ad `a_m`. `componente` = id della rete connessa (63 reti: molte valli sono collegate solo
+da strade). Provare un'altra tolleranza: `python -m pipeline.network 30`.
+
 ## Dati mancanti, riassunto
 
 1. Stato aperto/chiuso dei sentieri → solo `data/closures.yaml`.

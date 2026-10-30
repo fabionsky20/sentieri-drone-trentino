@@ -41,6 +41,9 @@ POI_DISTANCE_M = {
     "panoramico": 150,
     "passo": 150,
 }
+# Grafo della rete (percorsi personalizzati): estremi e incroci più vicini di così (m) diventano
+# un nodo solo. Gli estremi dei sentieri SAT spesso non coincidono esattamente.
+RETE_TOLLERANZA_M = 15
 # Valli con almeno questa estensione (km) diventano etichette "da lontano".
 VALLEY_MAJOR_KM = 8
 

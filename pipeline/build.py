@@ -31,7 +31,7 @@ import geopandas as gpd
 import shapely
 from shapely.geometry import box
 
-from . import access, authorities, closures, config, dem, dflight, enrich, osm, sat, segments
+from . import access, authorities, closures, config, dem, dflight, enrich, network, osm, sat, segments
 
 
 def write_geojson(gdf: gpd.GeoDataFrame, name: str, tolerance: float) -> int:
@@ -152,6 +152,10 @@ def main() -> int:
     tipi = [a.get("tipo") for v in accessi.values() for a in v.values()]
     print(f"Accessi in auto: {tipi.count('parcheggio')} parcheggi, {tipi.count('strada')} bordo strada, {tipi.count('nessuno')} senza strada vicina")
 
+    # ---- Grafo della rete per i percorsi personalizzati
+    rete = network.build(trails)
+    print(f"Rete: {network.summary(rete)} (tolleranza {config.RETE_TOLLERANZA_M} m)")
+
     used_ids = set(",".join(segs.zone + "," + segs.zone_temporanee).split(",")) - {""}
     zones["sui_sentieri"] = zones.zona_id.isin(used_ids)
 
@@ -164,6 +168,7 @@ def main() -> int:
     }
     if accessi:
         sizes["access.json"] = write_json(accessi, "access.json")
+    sizes["network.json"] = write_json(rete, "network.json")
     pois_out = pois.drop(columns=["forma"])
     pois_out["ele"] = pois_out.ele.astype("Int64")
     sizes["pois.geojson"] = write_geojson(pois_out, "pois.geojson", 0)

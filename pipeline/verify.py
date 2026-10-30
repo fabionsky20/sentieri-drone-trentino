@@ -171,7 +171,23 @@ def main() -> int:
         print(f"  E310 inizio (Passo Manghen): {e310.get('tipo')} {e310.get('nome', '')}, {e310.get('distanza_m')} m, dislivello {e310.get('dislivello_m')} m")
         check(e310.get("tipo") == "parcheggio" and e310.get("distanza_m", 9999) < 500, "E310: parcheggio al Passo Manghen entro 500 m")
 
-    print("\n13. Totali")
+    print("\n13. Grafo della rete (percorsi personalizzati)")
+    net = json.loads((P / "network.json").read_text(encoding="utf-8"))
+    nodi, archi = net["nodi"], net["archi"]
+    print(f"  {len(nodi)} nodi, {len(archi)} archi, tolleranza {net['tolleranza_m']} m")
+    check(set(a[2] for a in archi) == set(trails.id), "ogni sentiero è nel grafo")
+    lun = pd.Series({tid: sum(a[4] - a[3] for a in archi if a[2] == tid) for tid in trails.id})
+    ratio = lun / trails.set_index("id").lunghezza_m.reindex(lun.index)
+    check(ratio.between(0.97, 1.03).mean() > 0.99, f"archi coprono i sentieri per intero (mediana {ratio.median():.3f})")
+    by_trail = {}
+    for a in archi:
+        by_trail.setdefault(a[2], set()).update(a[:2])
+    for x, y in [("E310", "E322"), ("E323", "E325"), ("E101", "E105")]:
+        check(bool(by_trail.get(x, set()) & by_trail.get(y, set())), f"{x} e {y} si incontrano in un nodo")
+    comp = {n[2] for n in nodi}
+    check(len(comp) < 200, f"{len(comp)} componenti separate (reti in valli collegate solo da strade)")
+
+    print("\n14. Totali")
     for c, km in meta["km_per_colore"].items():
         print(f"  {c:7s} {km:7.1f} km")
 
