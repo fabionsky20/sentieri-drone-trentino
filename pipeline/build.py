@@ -31,7 +31,7 @@ import geopandas as gpd
 import shapely
 from shapely.geometry import box
 
-from . import authorities, closures, config, dem, dflight, enrich, osm, sat, segments
+from . import access, authorities, closures, config, dem, dflight, enrich, osm, sat, segments
 
 
 def write_geojson(gdf: gpd.GeoDataFrame, name: str, tolerance: float) -> int:
@@ -142,6 +142,16 @@ def main() -> int:
         row.update(stats.get(row["id"], {}))
     print(f"Profili: {len(profs)} sentieri")
 
+    # ---- Accesso in auto: parcheggio o bordo strada per entrambe le estremità (data/osm/)
+    if not args.offline:
+        try:
+            access.download(wgs_bounds, refresh=args.refresh_osm)
+        except RuntimeError as e:
+            print(f"  ATTENZIONE: {e}. Uso i file di data/osm/ se ci sono.")
+    accessi = access.compute(trails) if access.PARKING_FILE.exists() and access.ROADS_FILE.exists() else {}
+    tipi = [a.get("tipo") for v in accessi.values() for a in v.values()]
+    print(f"Accessi in auto: {tipi.count('parcheggio')} parcheggi, {tipi.count('strada')} bordo strada, {tipi.count('nessuno')} senza strada vicina")
+
     used_ids = set(",".join(segs.zone + "," + segs.zone_temporanee).split(",")) - {""}
     zones["sui_sentieri"] = zones.zona_id.isin(used_ids)
 
@@ -152,6 +162,8 @@ def main() -> int:
         "profiles.json": write_json(profs, "profiles.json"),
         "closures.json": write_json(chiusure, "closures.json"),
     }
+    if accessi:
+        sizes["access.json"] = write_json(accessi, "access.json")
     pois_out = pois.drop(columns=["forma"])
     pois_out["ele"] = pois_out.ele.astype("Int64")
     sizes["pois.geojson"] = write_geojson(pois_out, "pois.geojson", 0)
@@ -174,6 +186,7 @@ def main() -> int:
         "poi": int(len(pois)),
         "osm_scaricato": osm.downloaded_at(),
         "quote": dem.ATTRIBUTION,
+        **({"accesso": access.meta()} if accessi else {}),
     })
     sizes["meta.json"] = write_json(meta, "meta.json")
 

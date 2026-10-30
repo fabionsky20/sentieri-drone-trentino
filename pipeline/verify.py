@@ -151,7 +151,27 @@ def main() -> int:
     check(not unknown, f"{sum(map(len, chiusure.values()))} chiusure su {len(chiusure)} sentieri, tutti esistenti"
           + (f" (sconosciuti: {sorted(unknown)})" if unknown else ""))
 
-    print("\n12. Totali")
+    print("\n12. Accesso in auto (parcheggi e strade OSM)")
+    acc_path = P / "access.json"
+    if not acc_path.exists():
+        check(False, "access.json presente (eseguire la build con i dati di data/osm/)")
+    else:
+        acc = json.loads(acc_path.read_text(encoding="utf-8"))
+        check(set(acc) == set(trails.id), f"accesso calcolato per tutti i {len(acc)} sentieri")
+        pts = [a for v in acc.values() for a in v.values()]
+        tipi = pd.Series([a["tipo"] for a in pts]).value_counts().to_dict()
+        print(f"  estremità: {tipi}")
+        check(all(a["tipo"] == "nessuno" or ("lat" in a and "lon" in a) for a in pts), "ogni accesso ha le coordinate")
+        park = [a for a in pts if a["tipo"] == "parcheggio"]
+        check(all(a["distanza_m"] <= 1000 for a in park), "parcheggi entro 1 km dalla partenza")
+        check(all(a["distanza_m"] <= 3000 for a in pts if a["tipo"] == "strada"), "punti a bordo strada entro 3 km")
+        check(all(45.6 < a["lat"] < 46.6 and 10.3 < a["lon"] < 12.0 for a in pts if "lat" in a), "coordinate dentro il Trentino")
+        # Passo Manghen (E310 parte dal passo): ci deve essere un parcheggio vicino
+        e310 = acc.get("E310", {}).get("inizio", {})
+        print(f"  E310 inizio (Passo Manghen): {e310.get('tipo')} {e310.get('nome', '')}, {e310.get('distanza_m')} m, dislivello {e310.get('dislivello_m')} m")
+        check(e310.get("tipo") == "parcheggio" and e310.get("distanza_m", 9999) < 500, "E310: parcheggio al Passo Manghen entro 500 m")
+
+    print("\n13. Totali")
     for c, km in meta["km_per_colore"].items():
         print(f"  {c:7s} {km:7.1f} km")
 
