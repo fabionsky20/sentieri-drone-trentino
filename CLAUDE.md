@@ -11,7 +11,7 @@ Questo file è il riferimento per tutte le fasi. Dettagli sui dati reali: [docs/
 
 - **Uso attuale privato** (gruppo di ~10 amici), **costo zero**: GitHub Pages + Firebase Spark. Niente di commerciale (no ads, no pagamenti) finché non ci saranno permessi da D-Flight.
 - **Fase 1 Fondamenta:** A login aperto + profilo + hangar ✅ → B bacheche condivise con inviti ✅ → C note sui sentieri, "segna come fatto", statistiche ✅ → D meteo e indice di volabilità ✅.
-- **Fase 2 Beta:** PWA offline, notifiche push, anteprima di volo 3D ✅, ostacoli da OSM (cavi, linee elettriche, elisuperfici), segnalazioni con scadenza, Android in test chiuso.
+- **Fase 2 Beta:** PWA offline, notifiche push, anteprima di volo 3D ✅, crea percorso ✅, ostacoli da OSM (cavi, linee elettriche, elisuperfici), segnalazioni con scadenza, Android in test chiuso.
 - **Dopo:** luce/ora d'oro, mare di nubi, "cosa vedo da qui", punti di decollo, badge, card Instagram, lista inquadrature.
 - **REGOLA FISSA: l'app non registra, chiede o mostra MAI la quota a cui l'utente ha volato, né importa log di volo. Nessuna statistica di quota volata.** Si mostrano solo i limiti dello spazio aereo.
 - **Privacy:** storico e statistiche privati di default; ogni utente legge solo i propri dati.
@@ -176,10 +176,18 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
 - Web: `web/src/access.ts` (sezione "Come arrivare", `TrailView.access`): scelta "Parto da" (inizio/fine), link universale `https://www.google.com/maps/dir/?api=1&destination=LAT,LNG&travelmode=driving`, segnaposto "P" sulla mappa (`accessMarker`), avviso se il punto stradale è oltre 1,5 km (può essere in un'altra valle). `access.json` caricato alla prima scheda.
 - Meteo nella scheda: a tendina (`<details class="wxacc">`), chiusa di default, intestazione con l'esito; resta aperta mentre la si usa, si richiude cambiando sentiero (`wxOpen`).
 
+## Percorsi personalizzati ("Crea percorso")
+
+- Pipeline: `pipeline/network.py` → `network.json` (nodi a estremi/incroci, tolleranza `RETE_TOLLERANZA_M` = 15 m, archi in metri lungo la linea SAT con D+/D−; formato in `docs/DATA.md` §8). `access.write_cells` → `data/processed/accesso/<x>_<y>.json` (celle 0,1° con parcheggi pubblici e strade, per "Come arrivare" nel browser).
+- Web: `network.ts` (grafo, `anchorAt`, Dijkstra su stati arco+verso con penalità di cambio sentiero `CAMBIO_M` = 25 m contro i salti su tracciati condivisi, `closestPair` a griglia per reti separate), `routes.ts` (`planRoute`, `buildRoute` = "sentiero sintetico" con id `percorso:…` inserito in `trails`/`trailLines`/`profilesData`, così scheda, profilo, meteo, 3D e colori D-Flight funzionano senza modifiche; `toDoc`/`planFromDoc` per Firestore), `routeui.ts` (barra della modalità, riquadro con i pezzi, buco e ultimo tratto), `accessnear.ts` (stessa logica di `access.py`: parcheggio entro 1 km, strada entro 3 km, quote con `demElevation`).
+- Reti non collegate: mezzo percorso da ciascun lato verso la coppia di punti più vicina, buco tratteggiato arancione con etichetta. Meta POI fuori sentiero: ultimo pezzo tratteggiato con i metri. Pezzi < 50 m nascosti nel testo.
+- Salvataggio: `users/{uid}/percorsi` (I miei, nome modificabile) e `boards/{b}/percorsi` (copia di chi lo aggiunge, notifica `percorso`). Si salvano tratti SAT + partenza/arrivo + geometria (polyline): se i tratti non tornano più con lo shapefile nuovo, il percorso si ricalcola da partenza e arrivo. Nessun dato di volo.
+
 ## Prove automatiche (nel repo)
 
-- `web/e2e/` (playwright-core con Edge installato, nessun browser scaricato): `npm run build`, `npx vite preview --port 4173`, poi `npm run e2e` (oppure `node e2e/scheda.mjs <url>` per il sito online). `e2e/mock.mjs` intercetta Open-Meteo/NOAA (non consuma la quota). Screenshot in `web/e2e/screenshot/` (ignorati da git).
-- Le prove più vecchie (pannelli, account sugli emulatori, regole Firestore, 3D) stavano in una cartella temporanea che è stata cancellata: vanno riportate qui quando si toccano quelle parti.
+- `web/e2e/` (playwright-core con Edge installato, nessun browser scaricato): `npm run build`, `npx vite preview --port 4173`, poi `npm run e2e` (scheda + percorsi; oppure `node e2e/scheda.mjs <url>` per il sito online). `e2e/mock.mjs` intercetta Open-Meteo/NOAA (non consuma la quota). Screenshot in `web/e2e/screenshot/` (ignorati da git).
+- `firebase-test/` (Java 21 + `npm install` lì): `npm run regole` = prove di `firestore.rules` sull'emulatore (per ora i percorsi); `npm run emulatori` + `npm run e2e:salvataggio` in `web/` = salvo un percorso su PC e lo riapro da telefono (login Google finto dell'emulatore). `firebase.json` alla radice punta a `firestore.rules`.
+- Le prove più vecchie (pannelli, account, regole di bacheche/uscite, 3D) stavano in una cartella temporanea cancellata: vanno riportate qui quando si toccano quelle parti.
 
 ## Anteprima di volo 3D (Roadmap Fase 2)
 

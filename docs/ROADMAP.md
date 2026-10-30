@@ -38,6 +38,7 @@ Le regole di sicurezza di Firestore rifiutano qualunque campo non previsto, quin
 - **PWA installabile con offline** (mappe, dati e salvati disponibili senza rete).
 - **Notifiche push** (es. scadenze, inviti a una bacheca).
 - **Anteprima di volo 3D** ✅: terreno vero e cielo, camera da 20 a 120 m sopra un punto del sentiero (tocco sulla linea o POI), campo visivo da drone, rotazione 360°, inclinazione, "guarda verso" un POI, luce del sole per ora del giorno, zone D-Flight drappeggiate, immagine da salvare.
+- **Crea percorso** ✅: percorsi personalizzati su più sentieri SAT (partenza e arrivo con due tocchi, anche verso una meta fuori sentiero), scheda completa con "Come arrivare", salvabili nei miei e nelle bacheche.
 - **Ostacoli per droni** da OpenStreetMap (cavi di teleferiche e funivie, linee elettriche, elisuperfici) con avviso sul tratto.
 - **Segnalazioni dal sentiero** con scadenza (es. "lavori forestali fino al 20/10").
 - **App Android** in test chiuso.

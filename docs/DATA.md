@@ -285,6 +285,13 @@ In `meta.json`: `accesso` = data, attribuzione, numero di parcheggi e strade.
 Limiti: la distanza a piedi è in linea d'aria (nessun calcolo di percorso); il punto stradale più vicino
 può stare oltre una cresta, per questo l'app mostra distanza e dislivello e il punto sulla mappa.
 
+### `accesso/<x>_<y>.json` (in `data/processed/`)
+
+Per "Come arrivare" dei percorsi personalizzati (partenza qualsiasi, calcolo nel browser con la stessa logica):
+celle di 0,1° (`x = floor(lon/0,1)`, `y = floor(lat/0,1)`), il browser carica le 9 attorno al punto.
+`{"p": [[lon, lat, nome, tariffa, posti, sosta_max], …], "s": [[[lon, lat], …], …]}`: parcheggi pubblici
+e strade dove ci si può fermare (una strada compare in ogni cella che il suo riquadro tocca). ~9 MB in 164 celle.
+
 ## 8. Grafo della rete (`pipeline/network.py` → `network.json`)
 
 Per i percorsi personalizzati calcolati nel browser. Dallo shapefile SAT (una linea per sentiero):

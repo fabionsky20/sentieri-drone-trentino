@@ -19,12 +19,14 @@
 | `users/{uid}/notifiche/{n}` | notifiche in-app (inviti, ingressi, sentieri, ci sto, note), `letta` | solo l'utente (gli altri possono solo crearle, legate a una bacheca comune) |
 | `users/{uid}/uscite/{id}` | sentieri fatti: `sentiero`, `data`, `con` (nomi) + `conUid`, `commento`, `drone` (sì/no), `gpx_km`, `gpx_dplus`; uscite parziali: `parziale`, `partenza` (inizio/fine), `fino_m` (metri fatti da quel capo), `ar` (andata e ritorno). Senza questi campi l'uscita è completa | solo l'utente |
 | `users/{uid}/note/{sentiero}` | nota personale sul sentiero (`testo`, max 2000) | solo l'utente |
+| `users/{uid}/percorsi/{id}` | percorsi personalizzati: `nome`, `partenza`/`arrivo` (`lon`, `lat`, `sentiero`, `m`; arrivo anche `poi`, `poiNome`), `tratti` (`s`, `da`, `a`, `g`), `geometria` (encoded polyline), `km`, `dplus`, `buco_m`, `creato`, `aggiornato` | solo l'utente |
 | `users/{uid}/amici/{uid}` | amici entrati con il mio link: `nome`, `avatar`, `entrato` | solo l'utente (li scrive l'invitato mentre crea il profilo, solo con il codice giusto) |
 | `codiciInvito/{codice}` | link "Invita amici": `uid` e `nome` di chi invita | chiunque abbia il codice (anche senza login), nessun elenco |
 | `profili/{uid}` | rubrica per la ricerca per nome: `nome`, `avatar` | utenti con login; si toglie con "Visibile nella ricerca" nel profilo |
 | `boards/{b}` | bacheca: `nome`, `copertina` (colore o sentiero), `owner` | solo i membri |
 | `boards/{b}/partecipanti/{uid}` | `ruolo` (owner / editor / viewer), `nome`, `avatar`, `via` | solo i membri |
 | `boards/{b}/sentieri/{id}` | `da`, `aggiunto`, `data` prevista, `ciSto` | membri; scrive solo chi "può modificare" |
+| `boards/{b}/percorsi/{id}` | stessi campi dei percorsi + `da`, `daNome`, `aggiunto`; si può solo rinominare | membri; scrive chi "può modificare" |
 | `boards/{b}/note/{n}` | note del gruppo (max 1000 caratteri) | membri; scrive chi "può modificare" |
 | `boards/{b}/links/{token}` | link d'invito: `ruolo`, `scade` (max 30 giorni), `revocato` | il proprietario; chi ha il link legge solo quello |
 | `inviti/{b}_{uid}` | invito diretto per nome (scade in 30 giorni) | invitato e proprietario |
@@ -63,7 +65,7 @@ Il file [`firestore.rules`](../firestore.rules) è la copia di riferimento. **Va
 2. Seleziona tutto il testo e sostituiscilo con il contenuto di `firestore.rules` (su GitHub: apri il file → pulsante *Copy raw file*).
 3. **Pubblica**. Ha effetto entro un minuto.
 
-Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 sulle bacheche + 27 sugli inviti all'app + 46 su uscite (anche parziali) e note: chi non è membro non legge nulla, chi può solo vedere non scrive, link scaduti o revocati falliscono, nessuno entra senza invito valido, date fino a +10 anni).
+Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 sulle bacheche + 27 sugli inviti all'app + 46 su uscite (anche parziali) e note + 27 sui percorsi personalizzati, questi ultimi nel repo: `firebase-test/`, `npm run regole`: chi non è membro non legge nulla, chi può solo vedere non scrive, link scaduti o revocati falliscono, nessuno entra senza invito valido, date fino a +10 anni).
 
 ## Eliminazione account
 
@@ -74,6 +76,6 @@ Le regole sono provate sull'emulatore Firebase (36 casi sui dati personali + 83 
 Con `?emulatori` nell'indirizzo, **solo su localhost**, l'app usa gli emulatori Firebase (progetto `demo-quota120`, nessun contatto con i dati veri). Servono Java 21 e `firebase-tools`:
 
 ```
-npx firebase emulators:start --only firestore,auth --project demo-quota120
+cd firebase-test && npm install && npm run emulatori
 # poi: http://localhost:5173/?emulatori
 ```
