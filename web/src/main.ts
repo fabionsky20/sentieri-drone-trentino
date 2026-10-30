@@ -25,7 +25,7 @@ import { coverage, elevAt, nearestTrail, parseGpx, proposeFromGpx, type GpxTrack
 import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, renderWelcomeInvite, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt, projectOnLine, sliceLine } from './trailgeom'
-import { demElevation, startPreview, type PreviewPoi } from './preview3d'
+import { debug as flyDebug, demElevation, startPreview, type PreviewPoi } from './preview3d'
 import { nearestAccess } from './accessnear'
 import { renderAccess, type AccessData, type AccessPoint, type TrailAccess } from './access'
 import { anchorAt, buildNetwork, type Anchor, type Network, type NetworkFile } from './network'
@@ -106,6 +106,8 @@ const map = new maplibregl.Map({
 registerIcons(map)
 // Per le prove automatiche (nessun dato personale): permette di leggere lo stato della mappa.
 ;(window as unknown as { __q120map: maplibregl.Map }).__q120map = map
+// Solo per le prove automatiche: stato della camera dell'anteprima 3D.
+;(window as unknown as { __q120fly: typeof flyDebug }).__q120fly = flyDebug
 // La geolocalizzazione di MapLibre resta attiva ma nascosta: la comanda il pulsante della colonna strumenti.
 const geolocate = new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true })
 map.addControl(geolocate, 'top-right')
@@ -963,6 +965,7 @@ function fitPadding(): maplibregl.PaddingOptions {
 $('panel-close').addEventListener('click', () => select(null))
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return
+  if (document.body.classList.contains('fly3d')) return // Esc chiude solo l'anteprima 3D
   if (!searchList.hidden) closeSearch()
   else select(null)
 })
@@ -1928,36 +1931,46 @@ function groundAt(t: Trail, m: number): number {
   return prof ? elevAt(prof, m, L) : (t.quota_max ?? 1500)
 }
 
-/** Sezione "Anteprima di volo 3D": scorciatoie (punto più alto, POI del percorso) o tocco sulla linea. */
+/** Metri lungo il sentiero del punto più alto (dal profilo). */
+function highestAt(t: Trail): { m: number; q: number } | null {
+  const prof = profilesData?.[t.id]
+  const line = trailLines.get(t.id)
+  if (!prof || !line || !prof.q.length) return null
+  let hi = 0
+  prof.q.forEach((q, i) => {
+    if (q > prof.q[hi]) hi = i
+  })
+  return { m: Math.min(line.length, ((hi * prof.passo) / prof.lung) * line.length), q: prof.q[hi] }
+}
+
+/** Sezione "Anteprima di volo 3D": si parte dal punto più alto, oppure da un punto scelto
+ *  (POI del percorso o tocco sulla linea); poi il cursore porta lungo tutto il tracciato. */
 function renderFlyBox(t: Trail, box: HTMLElement): void {
   const open = h('button', { type: 'button', class: 'btn-outline wide' }, icon('drone', 18), 'ANTEPRIMA VOLO')
+  const choose = h('button', { type: 'button', class: 'btn-text' }, 'SCEGLI DA DOVE PARTIRE')
   const head = h('div', { class: 'section-head' }, h('p', { class: 'section-label' }, 'Anteprima di volo 3D'))
-  box.replaceChildren(head, open)
+  box.replaceChildren(head, open, choose)
   open.addEventListener('click', async () => {
-    const profiles = await getProfiles().catch(() => null)
+    await getProfiles().catch(() => null)
+    startFly(t, highestAt(t)?.m ?? 0)
+  })
+  choose.addEventListener('click', async () => {
+    await getProfiles().catch(() => null)
     const line = trailLines.get(t.id)
     if (!line) return
-    const L = line.length
     const chips = h('div', { class: 'chipgrid' })
     const add = (label: string, dot: string | null, go: () => void) => {
       const b = h('button', { type: 'button', class: 'chiptoggle' }, dot ? h('i', { class: 'dot', style: `background:${dot}` }) : icon('plus', 14), label)
       b.addEventListener('click', go)
       chips.append(b)
     }
-    const prof = profiles?.[t.id]
-    if (prof) {
-      let hi = 0
-      prof.q.forEach((q, i) => {
-        if (q > prof.q[hi]) hi = i
-      })
-      const m = ((hi * prof.passo) / prof.lung) * L
-      add(`Punto più alto · ${prof.q[hi].toLocaleString('it-IT')} m`, null, () => startFly(t, pointAt(line, m), `Punto più alto di ${t.numero}`, prof.q[hi]))
-    }
+    const top = highestAt(t)
+    if (top) add(`Punto più alto · ${top.q.toLocaleString('it-IT')} m`, null, () => startFly(t, top.m))
+    add('Partenza', null, () => startFly(t, 0))
     for (const tp of t.poi) {
       const info = pois.get(tp.id)
-      const c = poiCoord.get(tp.id)
-      if (!info || !c) continue
-      add(info.nome, CATEGORIES[info.categoria].color, () => startFly(t, c, info.nome, info.ele ?? groundAt(t, tp.km * 1000)))
+      if (!info) continue
+      add(info.nome, CATEGORIES[info.categoria].color, () => startFly(t, Math.min(line.length, tp.km * 1000)))
     }
     setPick3d(t.id)
     const cancel = h('button', { type: 'button', class: 'btn-text' }, 'ANNULLA')
@@ -1967,7 +1980,7 @@ function renderFlyBox(t: Trail, box: HTMLElement): void {
     })
     box.replaceChildren(
       head,
-      h('p', { class: 'small' }, 'Scegli il punto sopra cui volare: tocca la linea del sentiero sulla mappa, oppure:'),
+      h('p', { class: 'small' }, 'Scegli da dove partire: tocca la linea sulla mappa, oppure:'),
       chips,
       h('div', { class: 'form-actions' }, cancel),
     )
@@ -1985,31 +1998,34 @@ function pickFlyPoint(ll: maplibregl.LngLat): void {
     showToast('Tocca più vicino alla linea del sentiero.')
     return
   }
-  const km = (pr.along / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })
-  startFly(t, pr.at, `km ${km} di ${t.numero}`, groundAt(t, pr.along))
+  startFly(t, pr.along)
 }
 
-/** POI entro qualche km dal punto, per "Guarda verso…". */
-function poisNear(c: [number, number]): PreviewPoi[] {
+/** POI vicini al tracciato, per "Guarda verso…". */
+function poisNear(t: Trail): PreviewPoi[] {
+  const [w, s, e, n] = t.bbox
   const out: PreviewPoi[] = []
   for (const [id, p] of pois) {
     const pc = poiCoord.get(id)
-    if (!pc || Math.abs(pc[0] - c[0]) > 0.12 || Math.abs(pc[1] - c[1]) > 0.08) continue
+    if (!pc || pc[0] < w - 0.1 || pc[0] > e + 0.1 || pc[1] < s - 0.07 || pc[1] > n + 0.07) continue
     out.push({ nome: p.nome, categoria: p.categoria, lngLat: pc, ele: p.ele })
   }
   return out
 }
 
-function startFly(t: Trail, point: [number, number], name: string, ground: number): void {
+function startFly(t: Trail, at: number): void {
   setPick3d(null)
+  const line = trailLines.get(t.id)
+  if (!line) return
+  const route = isRoute(t.id) ? routes.get(t.id) : undefined
   startPreview({
     map,
-    point,
-    ground,
-    name,
-    trail: `${t.numero} · ${t.titolo}`,
+    path: { line, ground: (m) => groundAt(t, m), straight: route?.build.straight ?? [] },
+    at,
+    name: route ? t.titolo : `${t.numero} · ${t.titolo}`,
+    trail: route ? `Percorso personalizzato · ${(route.build.walkedM / 1000).toLocaleString('it-IT', { maximumFractionDigits: 1 })} km` : (t.gruppo_montuoso ?? 'Sentiero SAT'),
     day,
-    pois: poisNear(point),
+    pois: poisNear(t),
     mobile: mobile() || matchMedia('(pointer: coarse)').matches,
     // Sfondo pulito (il rilievo è quello che si illumina col sole) e zone attive visibili.
     prepare: () => {

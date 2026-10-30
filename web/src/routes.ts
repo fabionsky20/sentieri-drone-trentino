@@ -116,7 +116,8 @@ export interface RouteBuild {
   line: TrailLine
   profile: Profile
   pieces: Piece[] // tutti i pezzi in ordine (anche dopo il buco)
-  walkedM: number // metri su sentiero (senza buco e ultimo pezzo)
+  walkedM: number // metri su sentiero (senza buchi e deviazioni)
+  straight: { from: number; to: number }[] // pezzi in linea retta (buchi, deviazioni fino alle mete), in m lungo `line`
 }
 
 export interface RouteCtx {
@@ -144,6 +145,15 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
   let walked = 0
   const poi: TrailPoi[] = []
   const used = new Set<string>()
+  const straight: RouteBuild['straight'] = []
+  /** Pezzo in linea retta nella geometria e nel profilo (quota interpolata). */
+  const addStraight = (pts: [number, number][], meters: number, qa: number | undefined, qb: number | null) => {
+    push(pts)
+    const n = Math.max(1, Math.round(meters / STEP))
+    for (let k = 1; k < n; k++) if (qa != null && qb != null) q.push(qa + ((qb - qa) * k) / n)
+    straight.push({ from: pos, to: pos + meters })
+    pos += meters
+  }
   const push = (pts: [number, number][]) => {
     for (const p of pts) {
       const last = coords[coords.length - 1]
@@ -187,20 +197,23 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
   plan.stages.forEach((stage, si) => {
     stage.legs.forEach((leg, i) => {
       if (i > 0 && stage.gap) {
-        // buco: linea dritta (non camminata su sentiero SAT), quota interpolata
-        const qa = q[q.length - 1]
-        push([stage.gap.a, stage.gap.b])
-        const n = Math.max(1, Math.round(stage.gap.meters / STEP))
+        // buco: linea dritta (non camminata su sentiero SAT)
         const first = leg[0]
         const qb = first ? elevAt(c.profiles?.[first.trail], first.from, c.lines.get(first.trail)?.length ?? 1) : null
-        for (let k = 1; k < n; k++) if (qa != null && qb != null) q.push(qa + ((qb - qa) * k) / n)
-        pos += stage.gap.meters
+        addStraight([stage.gap.a, stage.gap.b], stage.gap.meters, q[q.length - 1], qb)
       }
       for (const p of leg) addPiece(p)
     })
     // meta della tappa (anche intermedia) tra i POI del percorso
     const stop = plan.stops[si + 1]
     if (stop.poi && !poi.some((x) => x.id === stop.poi!.id)) poi.push({ id: stop.poi.id, d: Math.round(stage.spur?.meters ?? 0), km: Math.round((pos / 1000) * 100) / 100 })
+    // deviazione fino alla meta fuori sentiero: andata (e ritorno, se non è l'arrivo)
+    if (stage.spur) {
+      const qa = q[q.length - 1]
+      const qp = c.pois.get(stop.poi!.id)?.ele ?? qa ?? null
+      addStraight([stage.spur.a, stage.spur.b], stage.spur.meters, qa, qp)
+      if (si < plan.stages.length - 1) addStraight([stage.spur.b, stage.spur.a], stage.spur.meters, qp ?? undefined, qa ?? null)
+    }
   })
   // TrailLine del percorso (cum geodetico come in trailgeom.buildTrailLines)
   const cum = [0]
@@ -254,7 +267,7 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
     quota_min_dem: Math.round(Math.min(...qq)),
     quota_max_dem: Math.round(Math.max(...qq)),
   }
-  return { trail, line, profile, pieces: allPieces, walkedM: walked }
+  return { trail, line, profile, pieces: allPieces, walkedM: walked, straight }
 }
 
 /** "km 3,2 di E325" (o nome della località se è un estremo del sentiero). */
