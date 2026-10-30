@@ -18,3 +18,5 @@ Thumbs.db
 
 # screenshot delle prove automatiche
 web/e2e/screenshot*/
+firebase-test/node_modules/
+firebase-test/*.log

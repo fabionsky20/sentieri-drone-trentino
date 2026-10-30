@@ -15,7 +15,7 @@ import { photosSection } from './photos'
 import { renderProfile, type ProfileEl } from './profile'
 import type { AccountState } from './account'
 import type { BoardsState } from './boards'
-import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, type BoardsActions, type TrailInfo } from './boardsui'
+import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, renderRoutePicker, routeCard, type BoardsActions, type TrailInfo } from './boardsui'
 import { airFactor, droneProfile, scoreHour, summarize, type DaySummary } from './flyindex'
 import { LISTA_METEO, MAX_SENTIERI } from './flyconfig'
 import { forecastState, getKp, getWeather, gridPoint, kpAt, weatherPaused, type WxPoint } from './weather'
@@ -28,7 +28,7 @@ import { buildTrailLines, pointAt, projectOnLine, sliceLine } from './trailgeom'
 import { startPreview, type PreviewPoi } from './preview3d'
 import { renderAccess, type AccessData } from './access'
 import { anchorAt, buildNetwork, type Anchor, type Network, type NetworkFile } from './network'
-import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planRoute, ROUTE_PREFIX, type RouteBuild, type RouteEnd, type RoutePlan } from './routes'
+import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planFromDoc, planRoute, ROUTE_PREFIX, toDoc, type RouteBuild, type RouteEnd, type RoutePlan, type SavedRoute } from './routes'
 import { renderRouteBar, renderRouteInfo, type RouteStep } from './routeui'
 import type {
   Colore,
@@ -823,7 +823,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const back: Selection = { kind: 'trail', id: trail.id, seg: segId }
   const seg = segId ? segById.get(segId) : undefined
   const route = isRoute(trail.id) ? routes.get(trail.id) : undefined
-  currentSave = route ? null : { trailId: trail.id, box: foot }
+  currentSave = { trailId: trail.id, box: foot }
   const accBox = h('section', { class: 'accbox' })
   if (!route) renderAccessBox(trail, accBox)
   const flyBox = h('section', { class: 'flybox' })
@@ -854,7 +854,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     weather: wxBox,
     preview: flyBox,
     access: route ? undefined : accBox,
-    intro: route ? h('section', { class: 'routebox' }, renderRouteInfo(route.plan, piecesText(route.build.pieces, trails))) : undefined,
+    intro: route ? h('section', { class: 'routebox' }, renderRouteInfo(route.plan, piecesText(route.build.pieces, trails), routeNameField(trail.id))) : undefined,
     onZone: (ids) => select({ kind: 'zones', ids, back }),
     onPoi: (id) => select({ kind: 'poi', id, back }),
     onFit: () => fitTrail(trail),
@@ -1329,6 +1329,11 @@ const boardsActions = (): BoardsActions => {
       select({ kind: 'trail', id })
       fitTrail(t)
     },
+    openRoute: (board, rid) => {
+      const r = boardsSt?.boards.get(board)?.percorsi.get(rid)
+      if (r) void openSavedRoute(r, `b-${board}-${rid}`)
+    },
+    removeRoute: async (board, rid) => (await m()).removeRouteFromBoard(board, rid),
     createBoard: async (nome, cop) => (await m()).createBoard(nome, cop),
     updateBoard: async (id, p) => (await m()).updateBoard(id, p),
     deleteBoard: async (id) => {
@@ -1468,7 +1473,8 @@ function setWalkPreview(trailId: string, p: { from: number; to: number; at: numb
 
 let netP: Promise<Network> | null = null
 const getNetwork = () => (netP ??= load<NetworkFile>('network.json').then(buildNetwork))
-const routes = new Map<string, { plan: RoutePlan; build: RouteBuild; name: string }>()
+// savedId = id nei "miei" (users/{uid}/percorsi) se il percorso è salvato.
+const routes = new Map<string, { plan: RoutePlan; build: RouteBuild; name: string; savedId?: string }>()
 let routeStep: RouteStep | null = null
 let routeStart: Anchor | null = null
 let routeSeq = 0
@@ -1574,15 +1580,88 @@ async function routeClick(e: maplibregl.MapMouseEvent): Promise<void> {
   drawRouteBar()
 }
 
-/** Registra il percorso come "sentiero sintetico" e apre la sua scheda. */
-function showRoute(id: string, plan: RoutePlan, name: string): void {
+/** Registra il percorso come "sentiero sintetico" (senza aprirlo). */
+function registerRoute(id: string, plan: RoutePlan, name: string, savedId?: string): void {
   const build = buildRoute(id, name, plan, { trails, lines: trailLines, profiles: profilesData, pois })
-  routes.set(id, { plan, build, name })
+  routes.set(id, { plan, build, name, savedId })
   trails.set(id, build.trail)
   trailLines.set(id, build.line)
   if (profilesData) profilesData[id] = build.profile
+}
+
+/** Registra il percorso e apre la sua scheda. */
+function showRoute(id: string, plan: RoutePlan, name: string, savedId?: string): void {
+  registerRoute(id, plan, name, savedId)
   select({ kind: 'trail', id })
-  fitTrail(build.trail)
+  fitTrail(trails.get(id)!)
+}
+
+/** Riapre un percorso salvato (nei miei o in una bacheca): dai tratti SAT, o ricalcolato se sono cambiati. */
+async function openSavedRoute(r: SavedRoute, key: string, savedId?: string): Promise<void> {
+  const [net] = await Promise.all([getNetwork(), getProfiles()])
+  const res = planFromDoc(r, net, trailLines, trailBoxes, poiCoord)
+  if (!res) {
+    showToast('Questo percorso non si può più ricostruire sui sentieri SAT attuali.')
+    return
+  }
+  if (res.ricalcolato) showToast('I sentieri SAT sono cambiati: percorso ricalcolato da partenza e arrivo.', 6000)
+  if (mobile()) setTab('map')
+  showRoute(`${ROUTE_PREFIX}${key}`, res.plan, r.nome, savedId)
+}
+
+/** Campo per il nome del percorso (se è salvato, lo rinomina anche nei miei). */
+function routeNameField(id: string): HTMLElement {
+  const r = routes.get(id)!
+  const input = h('input', { type: 'text', maxlength: '80', value: r.name, placeholder: r.build.trail.titolo, 'aria-label': 'Nome del percorso', class: 'route-name' }) as HTMLInputElement
+  input.addEventListener('keydown', (e) => e.key === 'Enter' && input.blur())
+  input.addEventListener('change', async () => {
+    const nome = input.value.trim()
+    if (nome === r.name) return
+    registerRoute(id, r.plan, nome, r.savedId)
+    render()
+    if (r.savedId && nome) {
+      try {
+        await (await loadAccount()).renameRoute(r.savedId, nome)
+      } catch (e) {
+        showToast(`Nome non salvato: ${(e as Error).message}`)
+      }
+    }
+  })
+  return h('label', { class: 'field route-namefield' }, h('span', { class: 'field-k' }, 'Nome'), input)
+}
+
+/** SALVA NEI MIEI di un percorso: lo salva (o lo toglie se c'è già). */
+async function toggleRoute(id: string): Promise<void> {
+  const m = await loadAccount()
+  if (acct?.status !== 'pronto') {
+    openSaved()
+    return
+  }
+  const r = routes.get(id)
+  if (!r) return
+  try {
+    if (r.savedId && acct.percorsi.some((p) => p.id === r.savedId)) {
+      await m.deleteRoute(r.savedId)
+      r.savedId = undefined
+    } else {
+      r.savedId = await m.saveRoute(toDoc(r.name, r.plan, r.build))
+      showToast('Percorso salvato nei miei')
+    }
+  } catch (e) {
+    showToast(`Salvataggio non riuscito: ${(e as Error).message}`)
+  }
+  renderSaveBox()
+}
+
+async function openRoutePicker(id: string): Promise<void> {
+  await loadAccount()
+  if (acct?.status !== 'pronto') {
+    openSaved()
+    return
+  }
+  pickerTrail = id
+  modal.hidden = false
+  renderPicker()
 }
 
 const itM = (m: number) => Math.round(m).toLocaleString('it-IT')
@@ -2051,7 +2130,14 @@ modal.addEventListener('click', (e) => e.target === modal && closeModal())
 let pickerTrail: string | null = null
 function renderPicker(): void {
   if (modal.hidden || !pickerTrail || !boardsSt) return
-  openModal(renderBoardPicker(pickerTrail, boardsSt, trailInfo(), boardsActions(), () => ((pickerTrail = null), closeModal())))
+  const close = () => ((pickerTrail = null), closeModal())
+  const r = isRoute(pickerTrail) ? routes.get(pickerTrail) : undefined
+  if (r) {
+    const add = async (board: string) => void (await (await loadAccount()).addRouteToBoard(board, toDoc(r.name, r.plan, r.build)))
+    openModal(renderRoutePicker(r.name || r.build.trail.titolo, boardsSt, boardsActions(), add, close))
+  } else {
+    openModal(renderBoardPicker(pickerTrail, boardsSt, trailInfo(), boardsActions(), close))
+  }
 }
 
 async function openBoardPicker(trailId: string): Promise<void> {
@@ -2073,12 +2159,13 @@ function renderSaveBox(): void {
     return
   }
   const { trailId } = currentSave
-  const mine = !!acct?.miei.has(trailId)
-  const shared = inBoards(trailId)
+  const route = isRoute(trailId) ? routes.get(trailId) : undefined
+  const mine = route ? !!route.savedId && !!acct?.percorsi.some((p) => p.id === route.savedId) : !!acct?.miei.has(trailId)
+  const shared = route ? false : inBoards(trailId)
   const b1 = h('button', { type: 'button', class: 'btn-primary', 'aria-pressed': String(mine) }, icon(mine ? 'bookmarkFilled' : 'bookmark', 18), mine ? 'NEI MIEI' : 'SALVA NEI MIEI')
-  b1.addEventListener('click', () => toggleMine(trailId))
+  b1.addEventListener('click', () => void (route ? toggleRoute(trailId) : toggleMine(trailId)))
   const b2 = h('button', { type: 'button', class: 'btn-outline', 'aria-pressed': String(shared) }, icon(shared ? 'check' : 'users', 18), 'AGGIUNGI A BACHECA')
-  b2.addEventListener('click', () => void openBoardPicker(trailId))
+  b2.addEventListener('click', () => void (route ? openRoutePicker(trailId) : openBoardPicker(trailId)))
   foot.classList.remove('single')
   foot.replaceChildren(b1, b2)
   foot.hidden = false
@@ -2113,7 +2200,7 @@ function renderSavedSheet(): void {
     parts.push(
       segmented<SavedTab>(
         [
-          ['miei', `I miei · ${st.miei.size}`],
+          ['miei', `I miei · ${st.miei.size + st.percorsi.length}`],
           ['bacheche', `Bacheche · ${bs?.boards.size ?? 0}`],
         ],
         savedTab,
@@ -2126,8 +2213,25 @@ function renderSavedSheet(): void {
     if (savedTab === 'miei') {
       const known = [...st.miei].filter(([id]) => trails.has(id))
       known.sort((x, y) => (y[1].aggiunto?.getTime() ?? 0) - (x[1].aggiunto?.getTime() ?? 0))
-      if (!known.length) parts.push(h('p', { class: 'muted empty-list' }, 'Nessun sentiero salvato: usa "Salva nei miei" nella scheda di un sentiero.'))
-      else parts.push(h('ul', { class: 'cards' }, ...known.map(([id]) => cardFor(trails.get(id)!, { onRemove: () => toggleMine(id) }))))
+      if (st.percorsi.length) {
+        parts.push(h('p', { class: 'section-label' }, `Percorsi · ${st.percorsi.length}`))
+        parts.push(
+          h(
+            'ul',
+            { class: 'cards' },
+            ...st.percorsi.map((r) =>
+              routeCard(
+                r,
+                () => void openSavedRoute(r, `m-${r.id}`, r.id),
+                () => void loadAccount().then((m) => m.deleteRoute(r.id)).catch((e) => showToast(`Non riuscito: ${(e as Error).message}`)),
+              ),
+            ),
+          ),
+        )
+        if (known.length) parts.push(h('p', { class: 'section-label' }, `Sentieri · ${known.length}`))
+      }
+      if (!known.length && !st.percorsi.length) parts.push(h('p', { class: 'muted empty-list' }, 'Nessun sentiero salvato: usa "Salva nei miei" nella scheda di un sentiero o di un percorso.'))
+      else if (known.length) parts.push(h('ul', { class: 'cards' }, ...known.map(([id]) => cardFor(trails.get(id)!, { onRemove: () => toggleMine(id) }))))
     } else if (bs) {
       parts.push(...boardsList(bs, trailInfo(), a, renderSavedSheet))
     }

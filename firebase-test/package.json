@@ -1,0 +1,14 @@
+{
+  "name": "quota120-firebase-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "regole": "firebase --config ../firebase.json emulators:exec --project demo-quota120 --only firestore,auth \"node regole.mjs\"",
+    "emulatori": "firebase --config ../firebase.json emulators:start --project demo-quota120 --only firestore,auth"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.0.0",
+    "firebase-tools": "15.34.2"
+  }
+}

@@ -1,8 +1,8 @@
 // Percorso personalizzato → "sentiero sintetico": stessa forma dei sentieri SAT (Trail, TrailLine,
 // profilo) così la scheda, il profilo, il meteo, i POI e l'anteprima 3D funzionano uguali.
 
-import { componentOf, closestPair, mergePieces, metersBetween, nearestAnchor, shortestPath, type Anchor, type Network, type Piece } from './network'
-import { sliceLine, type TrailLine } from './trailgeom'
+import { anchorAt as anchorAtFn, componentOf, closestPair, mergePieces, metersBetween, nearestAnchor, shortestPath, type Anchor, type Network, type Piece } from './network'
+import { pointAt as pointAtLine, sliceLine, type TrailLine } from './trailgeom'
 import type { PoiProps, Profile, Trail, TrailPoi } from './types'
 
 export const ROUTE_PREFIX = 'percorso:'
@@ -283,6 +283,80 @@ export function decodePolyline(s: string): [number, number][] {
     out.push([lon / 1e5, lat / 1e5])
   }
   return out
+}
+
+// ---------------------------------------------------------------- salvataggio (Firestore)
+
+/** Percorso salvato: abbastanza per ridisegnarlo (geometria) e per ricalcolarlo se i sentieri SAT
+ *  cambiano (tratti usati + partenza e arrivo). Nessun dato di volo. */
+export interface RouteDoc {
+  nome: string
+  partenza: { lon: number; lat: number; sentiero: string; m: number }
+  arrivo: { lon: number; lat: number; sentiero: string; m: number; poi?: string | null; poiNome?: string | null }
+  tratti: { s: string; da: number; a: number; g: number }[] // g = pezzo (0, o 1 dopo il buco)
+  geometria: string // encoded polyline
+  km: number
+  dplus: number
+  buco_m: number | null
+}
+
+export interface SavedRoute extends RouteDoc {
+  id: string
+  da?: string // in una bacheca: chi l'ha aggiunto
+  daNome?: string
+  aggiunto?: Date | null
+}
+
+const r1 = (v: number) => Math.round(v * 10) / 10
+const r5 = (v: number) => Math.round(v * 1e5) / 1e5
+
+export function toDoc(name: string, plan: RoutePlan, build: RouteBuild): RouteDoc {
+  const s = plan.start
+  const e = plan.end
+  return {
+    nome: (name || build.trail.titolo).slice(0, 80),
+    partenza: { lon: r5(s.lngLat[0]), lat: r5(s.lngLat[1]), sentiero: s.trail, m: r1(s.m) },
+    arrivo: { lon: r5(e.anchor.lngLat[0]), lat: r5(e.anchor.lngLat[1]), sentiero: e.anchor.trail, m: r1(e.anchor.m), poi: e.poi?.id ?? null, poiNome: e.poi?.nome.slice(0, 80) ?? null },
+    tratti: plan.legs.flatMap((leg, g) => leg.map((p) => ({ s: p.trail, da: r1(p.from), a: r1(p.to), g }))),
+    geometria: encodePolyline(build.line.coords),
+    km: Math.round(build.walkedM / 10) / 100,
+    dplus: build.trail.dislivello_pos ?? 0,
+    buco_m: plan.gap ? Math.round(plan.gap.meters) : null,
+  }
+}
+
+/** Ricostruisce il piano da un percorso salvato: dai tratti se i sentieri ci sono ancora
+ *  (stessa lunghezza), altrimenti ricalcolato da partenza e arrivo sul grafo attuale. */
+export function planFromDoc(d: RouteDoc, net: Network, lines: Map<string, TrailLine>, bboxes: Map<string, [number, number, number, number]>, poiCoord: Map<string, [number, number]>): { plan: RoutePlan; ricalcolato: boolean } | null {
+  const pieces = d.tratti.map((t) => ({ trail: t.s, from: t.da, to: t.a }))
+  const poiLL = d.arrivo.poi ? poiCoord.get(d.arrivo.poi) : undefined
+  const anchorFor = (p: { lon: number; lat: number; sentiero: string; m: number }) =>
+    (lines.has(p.sentiero) && net.byTrail.has(p.sentiero) ? anchorAtSafe(net, p) : null) ?? nearestAnchor(net, lines, bboxes, [p.lon, p.lat])
+  const start = anchorFor(d.partenza)
+  const endA = anchorFor(d.arrivo)
+  if (!start || !endA) return null
+  const end: RouteEnd = { anchor: endA, poi: d.arrivo.poi && poiLL ? { id: d.arrivo.poi, nome: d.arrivo.poiNome ?? 'Meta', lngLat: poiLL } : undefined }
+  if (pieces.length && piecesValid(pieces, lines)) {
+    const legs: Piece[][] = []
+    for (const t of d.tratti) (legs[t.g] ??= []).push({ trail: t.s, from: t.da, to: t.a })
+    const at = (p: Piece, which: 'from' | 'to'): [number, number] => {
+      const l = lines.get(p.trail)!
+      return pointAtLine(l, p[which])
+    }
+    let gap: RoutePlan['gap']
+    if (legs.length > 1 && legs[0]?.length && legs[1]?.length) {
+      const a = at(legs[0][legs[0].length - 1], 'to')
+      const b = at(legs[1][0], 'from')
+      gap = { a, b, meters: metersBetween(a, b) }
+    }
+    const tail = end.poi && metersBetween(endA.lngLat, end.poi.lngLat) > 15 ? { a: endA.lngLat, b: end.poi.lngLat, meters: metersBetween(endA.lngLat, end.poi.lngLat) } : undefined
+    return { plan: { start, end, legs: legs.map((l) => l ?? []), gap, tail }, ricalcolato: false }
+  }
+  return { plan: planRoute(net, lines, start, end), ricalcolato: true }
+}
+
+function anchorAtSafe(net: Network, p: { lon: number; lat: number; sentiero: string; m: number }): Anchor | null {
+  return anchorAtFn(net, p.sentiero, p.m, [p.lon, p.lat])
 }
 
 export { nearestAnchor }

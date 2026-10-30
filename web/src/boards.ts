@@ -25,6 +25,7 @@ import {
   type WriteBatch,
 } from 'firebase/firestore'
 import { db } from './fb'
+import type { RouteDoc, SavedRoute } from './routes'
 
 export type Ruolo = 'owner' | 'editor' | 'viewer'
 export type Copertina = { tipo: 'colore' | 'sentiero'; valore: string }
@@ -87,12 +88,13 @@ export interface Board {
   ruolo: Ruolo | null // il mio
   membri: Member[]
   sentieri: Map<string, BoardItem>
+  percorsi: Map<string, SavedRoute> // percorsi personalizzati condivisi
   note: BoardNote[]
   links: LinkInvite[] // solo per il proprietario
   invitiInviati: DirectInvite[] // solo per il proprietario
 }
 
-export type NotifTipo = 'invito' | 'accettato' | 'sentiero' | 'cisto' | 'nota'
+export type NotifTipo = 'invito' | 'accettato' | 'sentiero' | 'cisto' | 'nota' | 'percorso'
 
 export interface Notif {
   id: string
@@ -144,7 +146,7 @@ export function getBoardsState(): BoardsState {
 const toDate = (v: unknown): Date | null => (v as { toDate?: () => Date })?.toDate?.() ?? null
 
 function blank(id: string): Board {
-  return { id, nome: '…', copertina: { tipo: 'colore', valore: COVER_COLORS[0] }, owner: '', ruolo: null, membri: [], sentieri: new Map(), note: [], links: [], invitiInviati: [] }
+  return { id, nome: '…', copertina: { tipo: 'colore', valore: COVER_COLORS[0] }, owner: '', ruolo: null, membri: [], sentieri: new Map(), percorsi: new Map(), note: [], links: [], invitiInviati: [] }
 }
 
 function patchBoard(id: string, patch: Partial<Board>): void {
@@ -239,6 +241,32 @@ function watchBoard(id: string): void {
         }
       },
       () => void lost(),
+    ),
+    onSnapshot(
+      collection(db, 'boards', id, 'percorsi'),
+      (s) =>
+        patchBoard(id, {
+          percorsi: new Map(
+            s.docs.map((d) => [
+              d.id,
+              {
+              id: d.id,
+              nome: String(d.get('nome')),
+              partenza: d.get('partenza'),
+              arrivo: d.get('arrivo'),
+              tratti: d.get('tratti') ?? [],
+              geometria: String(d.get('geometria') ?? ''),
+              km: Number(d.get('km') ?? 0),
+              dplus: Number(d.get('dplus') ?? 0),
+              buco_m: d.get('buco_m') ?? null,
+                da: d.get('da'),
+                daNome: d.get('daNome'),
+                aggiunto: toDate(d.get('aggiunto')),
+              },
+            ]),
+          ),
+        }),
+      () => {},
     ),
     onSnapshot(
       collection(db, 'boards', id, 'sentieri'),
@@ -429,6 +457,7 @@ export async function deleteBoard(id: string): Promise<void> {
   const m = who()
   const refs = [
     ...(await getDocs(collection(db, 'boards', id, 'sentieri'))).docs.map((d) => d.ref),
+    ...(await getDocs(collection(db, 'boards', id, 'percorsi'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'boards', id, 'note'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'boards', id, 'links'))).docs.map((d) => d.ref),
     ...(await getDocs(query(collection(db, 'inviti'), where('bacheca', '==', id)))).docs.map((d) => d.ref),
@@ -484,6 +513,22 @@ export async function addTrail(id: string, trail: string): Promise<void> {
   b.set(doc(db, 'boards', id, 'sentieri', trail), { da: m.uid, daNome: m.nome.slice(0, 60), aggiunto: serverTimestamp(), data: null, ciSto: {} })
   notifyMembers(b, board, 'sentiero', { sentiero: trail })
   await b.commit()
+}
+
+/** Condivide un percorso personalizzato in una bacheca (copia: chi lo aggiunge resta autore). */
+export async function addRouteToBoard(id: string, r: RouteDoc): Promise<string> {
+  const board = await waitBoard(id)
+  const m = who()
+  const b = writeBatch(db)
+  const ref = doc(collection(db, 'boards', id, 'percorsi'))
+  b.set(ref, { ...r, da: m.uid, daNome: m.nome.slice(0, 60), aggiunto: serverTimestamp() })
+  notifyMembers(b, board, 'percorso', { testo: r.nome })
+  await b.commit()
+  return ref.id
+}
+
+export async function removeRouteFromBoard(id: string, routeId: string): Promise<void> {
+  await deleteDoc(doc(db, 'boards', id, 'percorsi', routeId))
 }
 
 export async function removeTrail(id: string, trail: string): Promise<void> {

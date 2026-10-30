@@ -10,6 +10,7 @@
 //   ├ notifiche/{id}                notifiche in app: le scrivono gli altri membri, le legge solo lui
 //   ├ uscite/{id}                   sentieri fatti (data, con chi, commento, drone sì/no, km/D+ GPX)
 //   ├ note/{trail}                  note personali sui sentieri
+//   ├ percorsi/{id}                 percorsi personalizzati salvati (tratti SAT + geometria)
 //   └ amici/{uid}                   amici entrati con il mio link (li scrive l'invitato, li leggo io)
 // - profili/{uid}                   rubrica pubblica (solo nome e foto) per la ricerca degli amici
 // - codiciInvito/{codice}           link "Invita amici": chi invita (uid e nome), leggibile col codice
@@ -215,6 +216,20 @@ service cloud.firestore {
           && request.resource.data.aggiornato == request.time;
       }
 
+      // Percorsi personalizzati salvati ("I miei"): solo del proprietario.
+      match /percorsi/{r} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && r.size() <= 40
+          && validRoute(request.resource.data, ['creato', 'aggiornato'])
+          && request.resource.data.creato == request.time
+          && request.resource.data.aggiornato == request.time;
+        allow update: if isOwner(uid)
+          && validRoute(request.resource.data, ['creato', 'aggiornato'])
+          && request.resource.data.creato == resource.data.creato
+          && request.resource.data.aggiornato == request.time;
+      }
+
       // Amici entrati con il mio link. Li crea l'invitato, una volta sola, mentre crea il proprio
       // profilo, e solo conoscendo il mio codice. Li leggo io; ognuno può togliere la propria voce.
       match /amici/{f} {
@@ -261,6 +276,33 @@ service cloud.firestore {
         && int(v.split('-')[0]) <= request.time.year() + 1;
     }
 
+    // Percorso personalizzato: partenza/arrivo, tratti SAT usati e geometria (polyline). `extra` =
+    // campi in più ammessi (date per i "miei", autore per le bacheche). Nessun dato di volo.
+    function validPoint(p) {
+      return p is map
+        && p.keys().hasAll(['lon', 'lat', 'sentiero', 'm'])
+        && p.keys().hasOnly(['lon', 'lat', 'sentiero', 'm', 'poi', 'poiNome'])
+        && p.lon is number && p.lon > 9.5 && p.lon < 13
+        && p.lat is number && p.lat > 45 && p.lat < 47.5
+        && validTrail(p.sentiero)
+        && p.m is number && p.m >= 0 && p.m <= 100000
+        && optStr(p.get('poi', null), 40)
+        && optStr(p.get('poiNome', null), 80);
+    }
+
+    function validRoute(d, extra) {
+      return d.keys().hasAll(['nome', 'partenza', 'arrivo', 'tratti', 'geometria', 'km', 'dplus'])
+        && d.keys().hasOnly(['nome', 'partenza', 'arrivo', 'tratti', 'geometria', 'km', 'dplus', 'buco_m'].concat(extra))
+        && str(d.nome, 1, 80)
+        && validPoint(d.partenza)
+        && validPoint(d.arrivo)
+        && d.tratti is list && d.tratti.size() <= 200
+        && d.geometria is string && d.geometria.size() <= 60000
+        && d.km is number && d.km >= 0 && d.km <= 500
+        && d.dplus is int && d.dplus >= 0 && d.dplus <= 30000
+        && (d.get('buco_m', null) == null || (d.buco_m is int && d.buco_m >= 0 && d.buco_m <= 100000));
+    }
+
     function validOuting(d) {
       return d.keys().hasAll(['sentiero', 'data', 'con', 'conUid', 'drone', 'creato', 'aggiornato'])
         && d.keys().hasOnly(['sentiero', 'data', 'con', 'conUid', 'commento', 'drone',
@@ -290,7 +332,7 @@ service cloud.firestore {
     function validNotif(d) {
       return d.keys().hasAll(['tipo', 'bacheca', 'bachecaNome', 'da', 'daNome', 'creato', 'letta'])
         && d.keys().hasOnly(['tipo', 'bacheca', 'bachecaNome', 'sentiero', 'da', 'daNome', 'testo', 'creato', 'letta'])
-        && d.tipo in ['invito', 'accettato', 'sentiero', 'cisto', 'nota']
+        && d.tipo in ['invito', 'accettato', 'sentiero', 'cisto', 'nota', 'percorso']
         && str(d.bacheca, 1, 40)
         && str(d.bachecaNome, 1, 60)
         && (d.get('sentiero', null) == null || validTrail(d.sentiero))
@@ -434,6 +476,23 @@ service cloud.firestore {
               && request.resource.data.ciSto.diff(resource.data.ciSto).affectedKeys().hasOnly([request.auth.uid])
               && request.resource.data.ciSto.get(request.auth.uid, true) == true)
           );
+        allow delete: if canEdit(b);
+      }
+
+      // ---- percorsi personalizzati condivisi (copia di chi li aggiunge)
+
+      match /percorsi/{r} {
+        allow read: if isMember(b);
+        allow create: if canEdit(b)
+          && r.size() <= 40
+          && validRoute(request.resource.data, ['da', 'daNome', 'aggiunto'])
+          && request.resource.data.da == request.auth.uid
+          && str(request.resource.data.daNome, 1, 60)
+          && request.resource.data.aggiunto == request.time;
+        // si può solo rinominare
+        allow update: if canEdit(b)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome'])
+          && str(request.resource.data.nome, 1, 80);
         allow delete: if canEdit(b);
       }
 

@@ -6,6 +6,7 @@ import { COVER_COLORS, LINK_DAYS } from './boards'
 import { segmented } from './filters'
 import { dotDate, flightBar, h, kmVal } from './panel'
 import { avatarEl, validDate, dateMax, DATE_MIN } from './profilepage'
+import type { SavedRoute } from './routes'
 import type { Colore, Trail } from './types'
 import { icon } from './ui'
 
@@ -14,6 +15,8 @@ export const RUOLO_LABEL: Record<Ruolo, string> = { owner: 'Proprietario', edito
 export interface BoardsActions {
   openBoard: (id: string) => void
   openTrail: (trail: string) => void
+  openRoute: (board: string, routeId: string) => void
+  removeRoute: (board: string, routeId: string) => Promise<void>
   createBoard: (nome: string, copertina: Copertina) => Promise<string>
   updateBoard: (id: string, patch: { nome?: string; copertina?: Copertina }) => Promise<void>
   deleteBoard: (id: string) => Promise<void>
@@ -467,6 +470,27 @@ export function renderBoard(ctx: BoardViewCtx): HTMLElement[] {
       h('p', { class: 'section-label' }, `Sentieri · ${items.length}`),
       items.length ? h('ul', { class: 'cards' }, ...items.map((i) => itemCard(ctx, i))) : h('p', { class: 'muted' }, 'Nessun sentiero. Dalla scheda di un sentiero usa “Aggiungi a bacheca”.'),
     ),
+    board.percorsi.size
+      ? h(
+          'section',
+          {},
+          h('p', { class: 'section-label' }, `Percorsi · ${board.percorsi.size}`),
+          h(
+            'ul',
+            { class: 'cards' },
+            ...[...board.percorsi.values()]
+              .sort((x, y) => (y.aggiunto?.getTime() ?? 0) - (x.aggiunto?.getTime() ?? 0))
+              .map((r) =>
+                routeCard(
+                  r,
+                  () => a.openRoute(board.id, r.id),
+                  board.ruolo === 'owner' || board.ruolo === 'editor' ? () => void run(null, () => a.removeRoute(board.id, r.id), a) : undefined,
+                  r.daNome ? `aggiunto da ${r.daNome}` : null,
+                ),
+              ),
+          ),
+        )
+      : null,
     membersSection(ctx),
     board.ruolo === 'owner' ? inviteSection(ctx) : null,
     board.ruolo === 'owner'
@@ -476,6 +500,78 @@ export function renderBoard(ctx: BoardViewCtx): HTMLElement[] {
         }),
   ]
   return parts.filter((x): x is HTMLElement => !!x)
+}
+
+// ---------------------------------------------------------------- percorsi personalizzati
+
+/** Card di un percorso personalizzato (nei "miei" e nelle bacheche). */
+export function routeCard(r: SavedRoute, onOpen: () => void, onRemove?: () => void, who?: string | null): HTMLElement {
+  const open = h(
+    'button',
+    { type: 'button', class: 'card-main' },
+    h(
+      'span',
+      { class: 'card-top' },
+      h('span', { class: 'mono muted route-tag' }, icon('route', 14), 'PERCORSO'),
+      r.buco_m ? h('span', { class: 'pill tiny', title: 'Un pezzo non è coperto da sentieri SAT' }, 'CON BUCO') : null,
+      h('span', { class: 'mono card-km' }, `${r.km.toLocaleString('it-IT', { maximumFractionDigits: 1 })} km`),
+    ),
+    h('span', { class: 'card-title' }, r.nome),
+    h('span', { class: 'card-who' }, [`D+ ${r.dplus.toLocaleString('it-IT')} m`, who].filter(Boolean).join(' · ')),
+  )
+  open.addEventListener('click', onOpen)
+  const li = h('li', { class: 'card' }, open)
+  if (onRemove) {
+    const del = h('button', { type: 'button', class: 'iconbtn card-remove', 'aria-label': `Togli il percorso ${r.nome}`, title: 'Togli' }, icon('close', 18))
+    del.addEventListener('click', onRemove)
+    li.append(del)
+  }
+  return li
+}
+
+/** "Aggiungi a bacheca" per un percorso: sceglie la bacheca (o ne crea una) e ce lo copia. */
+export function renderRoutePicker(title: string, st: BoardsState, a: BoardsActions, add: (board: string) => Promise<void>, close: () => void): HTMLElement {
+  const editable = [...st.boards.values()].filter((b) => b.ruolo === 'owner' || b.ruolo === 'editor').sort((x, y) => x.nome.localeCompare(y.nome, 'it'))
+  const list = h('ul', { class: 'pickerlist' })
+  for (const b of editable) {
+    const has = [...b.percorsi.values()].some((r) => r.nome === title)
+    list.append(
+      h(
+        'li',
+        {},
+        h('span', { class: 'member-name' }, b.nome, h('span', { class: 'mono small muted' }, ` · ${b.percorsi.size} percorsi`)),
+        has
+          ? h('span', { class: 'mono small ok-tag' }, icon('check', 16), 'PRESENTE')
+          : button('btn-outline', ['AGGIUNGI'], (btn) => void run(btn, async () => {
+              await add(b.id)
+              a.toast(`Percorso aggiunto a «${b.nome}»`)
+              close()
+            }, a)),
+      ),
+    )
+  }
+  const nome = h('input', { type: 'text', maxlength: '60', placeholder: 'Nome della nuova bacheca', 'aria-label': 'Nome della nuova bacheca' }) as HTMLInputElement
+  const create = h('button', { type: 'submit', class: 'btn-primary' }, 'CREA E AGGIUNGI') as HTMLButtonElement
+  const form = h('form', { class: 'row-input' }, nome, create)
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    if (!nome.value.trim()) return void nome.focus()
+    await run(create, async () => {
+      const id = await a.createBoard(nome.value, { tipo: 'colore', valore: COVER_COLORS[0] })
+      await add(id)
+      a.toast(`Creata «${nome.value.trim()}» con il percorso`)
+      close()
+    }, a)
+  })
+  return h(
+    'div',
+    { class: 'ob-card picker', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'picker-title' },
+    h('div', { class: 'ob-head' }, h('p', { class: 'section-label' }, 'Aggiungi a bacheca'), button('iconbtn', [icon('close')], close, { 'aria-label': 'Chiudi' })),
+    h('h2', { class: 'title small', id: 'picker-title' }, title),
+    editable.length ? list : h('p', { class: 'muted' }, 'Non hai ancora bacheche in cui puoi aggiungere percorsi.'),
+    h('p', { class: 'field-k' }, 'Nuova bacheca'),
+    form,
+  )
 }
 
 // ---------------------------------------------------------------- scelta della bacheca (scheda sentiero)
@@ -540,6 +636,8 @@ function notifText(n: Notif, info: TrailInfo): string {
       return `${n.daNome} ci sta per ${t} («${n.bachecaNome}»)`
     case 'nota':
       return `${n.daNome} ha scritto una nota su ${t}${n.testo ? `: “${n.testo}”` : ''}`
+    case 'percorso':
+      return `${n.daNome} ha condiviso il percorso «${n.testo ?? 'senza nome'}» in «${n.bachecaNome}»`
   }
 }
 

@@ -73,11 +73,13 @@ export interface AccountState {
   amici: Friend[] // entrati con il mio link, dal più recente
   uscite: Outing[] // sentieri fatti, dalla più recente (private)
   note: Map<string, string> // sentiero → nota personale (privata)
+  percorsi: SavedRoute[] // percorsi personalizzati salvati ("I miei"), dal più recente
   errore?: string
 }
 
 import { purgeBoardsData, startBoards, stopBoards } from './boards'
 import type { Outing, OutingInput } from './outings'
+import type { RouteDoc, SavedRoute } from './routes'
 import { auth, db } from './fb'
 
 export * from './boards'
@@ -92,6 +94,7 @@ const EMPTY = (): Omit<AccountState, 'status' | 'user'> => ({
   amici: [],
   uscite: [],
   note: new Map(),
+  percorsi: [],
 })
 let state: AccountState = { status: 'caricamento', user: null, ...EMPTY() }
 const listeners = new Set<(s: AccountState) => void>()
@@ -286,6 +289,27 @@ async function start(user: User): Promise<void> {
       fail,
     ),
     onSnapshot(
+      collection(db, 'users', uid, 'percorsi'),
+      (s) =>
+        emit({
+          percorsi: s.docs
+            .map((d) => ({
+              id: d.id,
+              nome: String(d.get('nome')),
+              partenza: d.get('partenza'),
+              arrivo: d.get('arrivo'),
+              tratti: d.get('tratti') ?? [],
+              geometria: String(d.get('geometria') ?? ''),
+              km: Number(d.get('km') ?? 0),
+              dplus: Number(d.get('dplus') ?? 0),
+              buco_m: d.get('buco_m') ?? null,
+              aggiunto: toDate(d.get('aggiornato')),
+            }))
+            .sort((a, b) => (b.aggiunto?.getTime() ?? 0) - (a.aggiunto?.getTime() ?? 0)),
+        }),
+      fail,
+    ),
+    onSnapshot(
       collection(db, 'users', uid, 'note'),
       (s) => emit({ note: new Map(s.docs.map((d) => [d.id, String(d.get('testo') ?? '')])) }),
       fail,
@@ -449,6 +473,24 @@ export async function saveNote(trailId: string, testo: string): Promise<void> {
   else await setDoc(ref, { testo: v, aggiornato: serverTimestamp() })
 }
 
+// ---------------------------------------------------------------- percorsi personalizzati (privati)
+
+/** Salva un percorso nei "miei" (nuovo, o aggiorna quello con `id`). Restituisce l'id. */
+export async function saveRoute(r: RouteDoc, id?: string): Promise<string> {
+  const u = uid()
+  const ref = id ? doc(db, 'users', u, 'percorsi', id) : doc(collection(db, 'users', u, 'percorsi'))
+  await setDoc(ref, { ...r, ...(id ? {} : { creato: serverTimestamp() }), aggiornato: serverTimestamp() }, { merge: !!id })
+  return ref.id
+}
+
+export async function renameRoute(id: string, nome: string): Promise<void> {
+  await setDoc(doc(db, 'users', uid(), 'percorsi', id), { nome: nome.trim().slice(0, 80), aggiornato: serverTimestamp() }, { merge: true })
+}
+
+export async function deleteRoute(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'users', uid(), 'percorsi', id))
+}
+
 // ---------------------------------------------------------------- salvati
 
 export async function save(list: ListName, trailId: string): Promise<void> {
@@ -482,6 +524,7 @@ export async function deleteAccount(): Promise<void> {
     ...(await getDocs(collection(db, 'users', u, 'amici'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'users', u, 'uscite'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'users', u, 'note'))).docs.map((d) => d.ref),
+    ...(await getDocs(collection(db, 'users', u, 'percorsi'))).docs.map((d) => d.ref),
   ]
   // Il mio codice di invito e la mia voce tra gli amici di chi mi ha invitato.
   if (state.profile?.invito_codice) refs.push(doc(db, 'codiciInvito', state.profile.invito_codice))
