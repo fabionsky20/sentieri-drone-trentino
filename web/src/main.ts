@@ -181,6 +181,8 @@ let wxSummaries = new Map<string, DaySummary>() // sentiero → indice del giorn
 let wxKey = '' // giorno|profilo drone a cui si riferiscono gli indici
 let wxStatus: WxStatus = 'caricamento'
 let wxHour: number | null = null // ora scelta nella scheda
+let wxOpen = false // tendina del meteo aperta (chiusa di default)
+let lastWxTrail: string | null = null
 let wxBase: Trail[] = [] // sentieri che passano gli altri filtri (per scegliere dove calcolare)
 let wxTimer = 0
 const wxPts = new Map<string, WxPointView[] | null>() // sentiero → punti (alto, centro) con meteo
@@ -816,6 +818,10 @@ function render(): void {
   currentWx = null
   setPick3d(null)
   wxHour = null
+  // La tendina del meteo si richiude cambiando sentiero (resta com'era se si ridisegna lo stesso).
+  const wxTrail = selection?.kind === 'trail' ? selection.id : null
+  if (wxTrail !== lastWxTrail) wxOpen = false
+  lastWxTrail = wxTrail
   if (!selection) {
     sheet.hidden = true
     currentSave = null
@@ -1667,6 +1673,8 @@ function renderWeatherBox(): void {
         scheduleWeather()
       },
       profile: droneProfile(drone),
+      open: wxOpen,
+      onToggle: (open) => (wxOpen = open),
     }),
   )
 }

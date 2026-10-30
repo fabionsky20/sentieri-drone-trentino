@@ -34,6 +34,8 @@ export interface WeatherCtx {
   droneId: string
   onDrone: (id: string) => void
   profile: DroneProfile
+  open: boolean // tendina aperta (chiusa di default)
+  onToggle: (open: boolean) => void
 }
 
 const fmt = (v: number | null, unit: string, d = 0) => (v == null ? '–' : `${v.toLocaleString('it-IT', { maximumFractionDigits: d })}${unit}`)
@@ -77,10 +79,31 @@ function detailTable(points: WxPointView[], hr: number, kp: number | null): HTML
   return h('table', { class: 'wxtable' }, h('thead', {}, head), h('tbody', {}, ...body, kpRow))
 }
 
+/** Esito sintetico per l'intestazione della tendina. */
+function badge(c: WeatherCtx): HTMLElement {
+  if (c.status === 'passato' || c.status === 'lontano') return h('span', { class: 'wxbadge muted' }, 'nessuna previsione')
+  if (c.status === 'pausa' || c.status === 'errore') return h('span', { class: 'wxbadge muted' }, 'non disponibile')
+  if (!c.summary || !c.points.length) return h('span', { class: 'wxbadge muted' }, 'carico…')
+  const s = c.summary
+  const incerta = agreement(c.points.map((p) => p.wx)).stato === 'incerto'
+  return h('span', { class: `wxbadge ${volClass(s.index)}` }, h('i', { class: 'dot' }), h('span', { class: 'mono' }, String(s.index)), h('span', {}, s.level), incerta ? h('span', { class: 'muted' }, '· incerta') : null)
+}
+
+/** Sezione meteo a tendina: chiusa di default, intestazione con l'esito, dettagli dentro. */
 export function renderWeather(c: WeatherCtx): HTMLElement {
-  const sec = h('div', { class: 'wx' })
+  const det = h('details', { class: 'wxacc' }) as HTMLDetailsElement
+  det.open = c.open
+  det.addEventListener('toggle', () => c.onToggle(det.open))
   const dateLbl = c.day.split('-').reverse().join('.')
-  sec.append(h('div', { class: 'section-head' }, h('p', { class: 'section-label' }, 'Meteo e volabilità'), h('span', { class: 'mono' }, dateLbl)))
+  det.append(
+    h('summary', { class: 'wxsum' }, h('span', { class: 'section-label' }, 'Meteo · volabilità'), badge(c), h('span', { class: 'mono small wxdate' }, dateLbl), icon('chevronRight', 18)),
+    weatherBody(c),
+  )
+  return det
+}
+
+function weatherBody(c: WeatherCtx): HTMLElement {
+  const sec = h('div', { class: 'wx' })
   const msg = (t: string) => sec.append(h('p', { class: 'muted small' }, t))
   if (c.status === 'passato') {
     msg('Nessuna previsione per una data passata.')
