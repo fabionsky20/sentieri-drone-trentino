@@ -164,6 +164,7 @@ export interface TrailView {
   mine?: HTMLElement // le mie uscite e la nota personale, riempito da chi chiama
   weather?: HTMLElement // meteo e volabilità, riempito da chi chiama
   preview?: HTMLElement // anteprima di volo 3D, riempito da chi chiama
+  access?: HTMLElement // come arrivare in auto, riempito da chi chiama
   onZone: (ids: string[]) => void
   onPoi: (id: string) => void
   onFit: () => void
@@ -270,6 +271,7 @@ export function renderTrail(v: TrailView): HTMLElement {
     ),
     v.weather ?? null,
     v.preview ?? null,
+    v.access ?? null,
     v.mine ?? null,
     h('section', {}, sectionHead('Profilo', fit), v.profile),
     poiChips(v),

@@ -169,6 +169,18 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
 - In `main.ts`: `refreshWeather` (debounce su giorno, filtri, spostamento mappa, sentiero aperto) calcola solo per il sentiero aperto + primi `LISTA_METEO` risultati + sentieri nella zona della mappa, fino a `MAX_SENTIERI`. Punto più alto e centrale dai profili altimetrici (`profiles.json`). Filtro `volMin`, ordinamento `ordina`, mappa per volabilità `coloraVol` (feature-state `vol` per tratto, legenda che cambia).
 - Prove: le prove che non riguardano il meteo intercettano Open-Meteo/NOAA con risposte finte (non consumano la quota gratuita: 10.000 punti al giorno, limite al minuto).
 
+## Come arrivare (accesso in auto)
+
+- `pipeline/access.py`: Overpass UNA volta (build) → parcheggi e strade percorribili, una query alla volta a tasselli (remark di timeout = errore → tassello diviso in 4). Nel repo `data/osm/parcheggi.json.gz` e `strade.json.gz` (compatti, data + "© OpenStreetMap contributors (ODbL)"); grezzi in `data/raw/osm/`. Con i file di `data/osm/` la build non interroga Overpass (`--refresh-osm` per riscaricare, oppure `python -m pipeline.access --refresh`).
+- Per entrambe le estremità di ogni sentiero → `data/processed/access.json`: parcheggio pubblico più vicino entro 1 km, altrimenti strada percorribile entro 3 km (no autostrade), altrimenti "nessuno"; distanza in linea d'aria e dislivello dal DEM. Formato in `docs/DATA.md` §7.
+- Web: `web/src/access.ts` (sezione "Come arrivare", `TrailView.access`): scelta "Parto da" (inizio/fine), link universale `https://www.google.com/maps/dir/?api=1&destination=LAT,LNG&travelmode=driving`, segnaposto "P" sulla mappa (`accessMarker`), avviso se il punto stradale è oltre 1,5 km (può essere in un'altra valle). `access.json` caricato alla prima scheda.
+- Meteo nella scheda: a tendina (`<details class="wxacc">`), chiusa di default, intestazione con l'esito; resta aperta mentre la si usa, si richiude cambiando sentiero (`wxOpen`).
+
+## Prove automatiche (nel repo)
+
+- `web/e2e/` (playwright-core con Edge installato, nessun browser scaricato): `npm run build`, `npx vite preview --port 4173`, poi `npm run e2e` (oppure `node e2e/scheda.mjs <url>` per il sito online). `e2e/mock.mjs` intercetta Open-Meteo/NOAA (non consuma la quota). Screenshot in `web/e2e/screenshot/` (ignorati da git).
+- Le prove più vecchie (pannelli, account sugli emulatori, regole Firestore, 3D) stavano in una cartella temporanea che è stata cancellata: vanno riportate qui quando si toccano quelle parti.
+
 ## Anteprima di volo 3D (Roadmap Fase 2)
 
 - `web/src/preview3d.ts` (`startPreview`): riusa la mappa principale (niente secondo contesto WebGL). Terreno da una sorgente dedicata `terrain3d` uguale al tilejson di Mapterhorn (terrarium, 512 px, **maxzoom 14** = LiDAR in Trentino; la sorgente `terrain` dell'ombreggiatura 2D resta a z12 apposta), exaggeration 1, e `setSky` con foschia.

@@ -26,6 +26,7 @@ import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfil
 import { rank } from './search'
 import { buildTrailLines, pointAt, projectOnLine, sliceLine } from './trailgeom'
 import { startPreview, type PreviewPoi } from './preview3d'
+import { renderAccess, type AccessData } from './access'
 import type {
   Colore,
   FC,
@@ -139,6 +140,13 @@ const getProfiles = () =>
     profilesData = d
     return d
   }))
+// Accesso in auto (parcheggi e strade OSM, precalcolato): si carica alla prima scheda aperta.
+let accessP: Promise<AccessData> | null = null
+let accessData: AccessData | null = null
+const getAccess = () =>
+  (accessP ??= load<AccessData>('access.json')
+    .catch(() => ({}) as AccessData) // dati non ancora generati: la sezione lo dice, senza errori
+    .then((d) => (accessData = d)))
 let searchP: Promise<SearchItem[]> | null = null
 const getSearch = () => (searchP ??= load<SearchItem[]>('search.json'))
 
@@ -776,6 +784,8 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const back: Selection = { kind: 'trail', id: trail.id, seg: segId }
   const seg = segId ? segById.get(segId) : undefined
   currentSave = { trailId: trail.id, box: foot }
+  const accBox = h('section', { class: 'accbox' })
+  renderAccessBox(trail, accBox)
   const flyBox = h('section', { class: 'flybox' })
   renderFlyBox(trail, flyBox)
   const wxBox = h('section', { class: 'wxbox' })
@@ -800,6 +810,7 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     mine: myBox,
     weather: wxBox,
     preview: flyBox,
+    access: accBox,
     onZone: (ids) => select({ kind: 'zones', ids, back }),
     onPoi: (id) => select({ kind: 'poi', id, back }),
     onFit: () => fitTrail(trail),
@@ -817,6 +828,7 @@ function render(): void {
   currentMine = null
   currentWx = null
   setPick3d(null)
+  accessMarker.remove()
   wxHour = null
   // La tendina del meteo si richiude cambiando sentiero (resta com'era se si ridisegna lo stesso).
   const wxTrail = selection?.kind === 'trail' ? selection.id : null
@@ -1401,6 +1413,37 @@ function setWalkPreview(trailId: string, p: { from: number; to: number; at: numb
     const r = prof.lung / (line.length || 1)
     currentProfile.el.setPin({ from: p.from * r, to: p.to * r, at: p.at * r })
   }
+}
+
+// ---- come arrivare (parcheggio o bordo strada, per ciascuna estremità)
+
+let accessFrom: { trail: string; from: 'inizio' | 'fine' } = { trail: '', from: 'inizio' }
+const accessMarker = new maplibregl.Marker({ element: h('div', { class: 'access-pin', title: 'Dove arrivare in auto' }, 'P') })
+
+function renderAccessBox(t: Trail, box: HTMLElement): void {
+  if (accessFrom.trail !== t.id) accessFrom = { trail: t.id, from: 'inizio' }
+  const draw = () => {
+    const a = accessData ? (accessData[t.id] ?? null) : undefined
+    box.replaceChildren(
+      renderAccess({
+        trail: t,
+        access: a,
+        from: accessFrom.from,
+        onFrom: (v) => {
+          accessFrom = { trail: t.id, from: v }
+          draw()
+        },
+        updated: meta.accesso?.aggiornato ?? null,
+      }),
+    )
+    const p = a?.[accessFrom.from]
+    if (p && p.lat != null && p.lon != null && selection?.kind === 'trail' && selection.id === t.id) {
+      accessMarker.getElement().classList.toggle('road', p.tipo !== 'parcheggio')
+      accessMarker.setLngLat([p.lon, p.lat]).addTo(map)
+    } else accessMarker.remove()
+  }
+  draw()
+  if (!accessData) void getAccess().then(() => box.isConnected && draw())
 }
 
 // ---- anteprima di volo 3D

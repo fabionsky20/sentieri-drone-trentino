@@ -3615,3 +3615,80 @@ body.picking3d #map canvas {
 .wxacc > .wx {
   margin-top: 6px;
 }
+
+/* ---- come arrivare ---- */
+
+.access {
+  display: grid;
+  gap: 10px;
+}
+
+.access .section-head,
+.access .field {
+  margin: 0;
+}
+
+.access-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--r-tile);
+  background: var(--panel2);
+}
+
+.access-card p {
+  margin: 0;
+}
+
+.access-name {
+  font-weight: 600;
+}
+
+/* "P" come il cartello stradale: blu con lettera bianca (contrasto 7:1) */
+.pmark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #1d4f91;
+  color: #fff;
+  font-family: var(--font-cond);
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.pmark.road {
+  background: var(--muted);
+}
+
+.access > p {
+  margin: 0;
+}
+
+a.access-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.access-pin {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 2px solid #fff;
+  background: #1d4f91;
+  color: #fff;
+  font: 700 15px/1 var(--font-cond);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+}
+
+.access-pin.road {
+  background: var(--muted);
+}

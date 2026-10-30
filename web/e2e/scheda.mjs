@@ -68,6 +68,56 @@ const txt = async (p, sel) => (await p.locator(sel).first().innerText()).replace
   await p.context().close()
 }
 
+// ---------------- come arrivare
+{
+  const access = await (await fetch(new URL('data/access.json', BASE))).json()
+  const p = await open('desktop')
+  await openTrail(p, 'e310')
+  await p.waitForSelector('.access .section-head', { timeout: 10000 })
+  await p.waitForFunction(() => !/Carico i parcheggi/.test(document.querySelector('.access')?.textContent ?? ''), null, { timeout: 15000 })
+  const sec = await txt(p, '.access')
+  const a = access.E310.inizio
+  check(/Come arrivare/i.test(sec) && /Parto da/i.test(sec), 'come arrivare: sezione con scelta della partenza')
+  check(a.tipo === 'parcheggio' && sec.includes(a.nome ?? 'Parcheggio'), `E310 dal Passo Manghen: parcheggio "${a.nome ?? 'senza nome'}"`)
+  check(/a piedi \(in linea d'aria\) fino alla partenza|già alla partenza/.test(sec), `distanza a piedi: ${sec.match(/~[\d.]+ m[^.]*?partenza[^)]*\)?/)?.[0] ?? sec.match(/già alla partenza/)?.[0]}`)
+  const href = await p.locator('a.access-go').getAttribute('href')
+  check(href === `https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lon}&travelmode=driving`, `link Google Maps verso il parcheggio (${href})`)
+  check((await p.locator('a.access-go').getAttribute('target')) === '_blank', 'il link si apre a parte (app Maps sul telefono)')
+  check(await p.locator('.access-pin').isVisible(), 'punto di arrivo sulla mappa')
+  await p.locator('.access').scrollIntoViewIfNeeded()
+  await p.screenshot({ path: `${OUT}/come_arrivare_inizio.png` })
+  // al contrario: l'altra estremità
+  await p.locator('.access [role="radio"]').nth(1).click()
+  await p.waitForTimeout(300)
+  const b = access.E310.fine
+  const href2 = (await p.locator('a.access-go').count()) ? await p.locator('a.access-go').getAttribute('href') : null
+  check(b.tipo === 'nessuno' ? href2 === null : href2 === `https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lon}&travelmode=driving`, `al contrario: destinazione dell'altra estremità (${b.tipo})`)
+  await p.screenshot({ path: `${OUT}/come_arrivare_fine.png` })
+  // un sentiero senza parcheggio vicino: "solo bordo strada"
+  const road = Object.entries(access).find(([, v]) => v.inizio?.tipo === 'strada')
+  if (road) {
+    await openTrail(p, road[0].toLowerCase())
+    await p.waitForFunction(() => !/Carico i parcheggi/.test(document.querySelector('.access')?.textContent ?? ''), null, { timeout: 15000 })
+    const s2 = await txt(p, '.access')
+    check(/Solo bordo strada/.test(s2) && /Nessun parcheggio entro 1 km/.test(s2), `${road[0]}: detto chiaramente che è solo bordo strada`)
+    await p.locator('.access').scrollIntoViewIfNeeded()
+    await p.screenshot({ path: `${OUT}/come_arrivare_strada.png` })
+  }
+  // chiudendo la scheda il punto sparisce
+  await p.click('#panel-close')
+  await p.waitForTimeout(300)
+  check(!(await p.locator('.access-pin').isVisible()), 'chiudendo la scheda il punto di arrivo sparisce')
+  await p.context().close()
+}
+{
+  const p = await open('mobile')
+  await openTrail(p, 'e310')
+  await p.waitForFunction(() => !!document.querySelector('a.access-go'), null, { timeout: 15000 })
+  const box = await p.locator('a.access-go').boundingBox()
+  check(box && box.height >= 44 && (await p.locator('a.access-go').getAttribute('href')).startsWith('https://www.google.com/maps/dir/?api=1&destination='), 'telefono: pulsante Naviga con Google Maps (link universale)')
+  await p.context().close()
+}
+
 console.log(`OK (${ok.length})`)
 for (const m of ok) console.log('  ' + m)
 console.log(`\nFALLITI (${fail.length}):`)

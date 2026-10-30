@@ -119,6 +119,7 @@ export interface Meta {
   tratti: number
   osm_scaricato?: string | null
   quote?: string
+  accesso?: { aggiornato: string; attribuzione: string; parcheggi: number; strade: number }
 }
 
 export type FC<P> = GeoJSON.FeatureCollection<GeoJSON.Geometry, P>
