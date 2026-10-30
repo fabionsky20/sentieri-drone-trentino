@@ -250,6 +250,41 @@ inesistente, data impossibile, fine prima dell'inizio. Output: `data/processed/c
 scelta: riquadro "Chiuso" nella scheda, "CHIUSO" nella lista dei risultati, filtro "Solo
 sentieri aperti".
 
+## 7. Accesso in auto: parcheggi e strade (`pipeline/access.py`)
+
+Scaricati UNA volta da Overpass (build, mai a runtime), per il riquadro dei sentieri + margine,
+una query alla volta con pausa di 10 s, User-Agent identificativo, nuovi tentativi su errori e 429.
+Un tassello che va in timeout (anche con risposta 200 vuota e `remark` di timeout) si divide in 4.
+
+- **Parcheggi**: `nwr["amenity"="parking"]`, `out center tags` (centroide per way/relation). Tag tenuti:
+  `name, fee, capacity, surface, access, parking, opening_hours, maxstay`.
+- **Strade percorribili**: `highway` motorway…unclassified (+ svincoli), residential, living_street, service;
+  esclusi track/path e chi ha `access`, `motor_vehicle` o `motorcar` = no/private/forestry/agricultural/destination;
+  esclusi i `service` driveway/parking_aisle/drive-through/emergency_access.
+
+File nel repo (`data/osm/`, compressi, con `aggiornato`, `attribuzione` "© OpenStreetMap contributors (ODbL)", `fonte`):
+- `parcheggi.json.gz`: `campi` = osm, lon, lat, name, fee, capacity, surface, access, parking, opening_hours, maxstay; `dati` = righe.
+- `strade.json.gz`: `dati` = `[highway, [[lon, lat], …]]`, linee semplificate a 5 m, coordinate a 5 decimali.
+
+Le risposte grezze restano in `data/raw/osm/parcheggi.json` e `strade.json` (non versionate).
+Con i file di `data/osm/` presenti la build non interroga Overpass (`--refresh-osm` per riscaricare).
+
+### `access.json` (in `data/processed/`)
+
+Per ogni sentiero `{ "inizio": {…}, "fine": {…} }` (le due estremità della geometria SAT: un sentiero
+si può fare nei due versi):
+- parcheggio pubblico più vicino entro **1 km** in linea d'aria (esclusi `access` = no/private/customers/permit/delivery);
+- altrimenti il punto più vicino sulla strada percorribile, entro **3 km** (escluse autostrade/superstrade: non ci si ferma);
+- altrimenti `{"tipo": "nessuno"}`.
+
+Campi: `tipo` (parcheggio | strada | nessuno), `lat`, `lon`, `distanza_m` (in linea d'aria fino alla partenza),
+`quota` e `dislivello_m` (dal DEM; + = dalla destinazione si sale alla partenza); per i parcheggi anche
+`nome`, `tariffa` (gratuito | a pagamento | sconosciuto, da `fee`), `posti`, `fondo`, `orari`, `sosta_max`, `osm`.
+In `meta.json`: `accesso` = data, attribuzione, numero di parcheggi e strade.
+
+Limiti: la distanza a piedi è in linea d'aria (nessun calcolo di percorso); il punto stradale più vicino
+può stare oltre una cresta, per questo l'app mostra distanza e dislivello e il punto sulla mappa.
+
 ## Dati mancanti, riassunto
 
 1. Stato aperto/chiuso dei sentieri → solo `data/closures.yaml`.
