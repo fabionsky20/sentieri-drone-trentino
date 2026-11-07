@@ -53,7 +53,7 @@ OUT = config.PROCESSED / "avvisi.json"
 
 # Parole che rendono un comunicato interessante (titolo o anteprima).
 TOPIC = re.compile(r"sentier|ferrat|tracciat|escursion|frana|crollo|smottament|percorribil|rifugi", re.I)
-REOPEN = re.compile(r"riapert|riapre|riaprono|tornan[oa] percorribil|nuovamente percorribil|revocat[ao] l.ordinanza|revoca dell.ordinanza|di nuovo percorribil", re.I)
+REOPEN = re.compile(r"riapert|ripristinat|riapre|riaprono|tornan[oa] percorribil|nuovamente percorribil|revocat[ao] l.ordinanza|revoca dell.ordinanza|di nuovo percorribil", re.I)
 CLOSED = re.compile(r"chius[oaie]|chiusura|interrott|divieto di transito|vietat|inagibil|non percorribil|impercorribil|franat|crollo|frana\b", re.I)
 MESI = {m: i + 1 for i, m in enumerate(["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"])}
 DATE_RE = re.compile(r"(\d{1,2})\s+(" + "|".join(MESI) + r")\s+(\d{4})", re.I)
