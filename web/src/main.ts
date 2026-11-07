@@ -15,7 +15,7 @@ import { photosSection } from './photos'
 import { renderProfile, type ProfileEl } from './profile'
 import type { AccountState } from './account'
 import type { BoardsState } from './boards'
-import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, renderRoutePicker, routeCard, type BoardsActions, type TrailInfo } from './boardsui'
+import { boardsList, inviteCards, migrationBanner, renderBoard, renderBoardPicker, renderLinkInvite, renderNotifications, renderRoutePicker, routeCard, type BoardPanel, type BoardsActions, type TrailInfo } from './boardsui'
 import { airFactor, droneProfile, scoreHour, summarize, type DaySummary } from './flyindex'
 import { LISTA_METEO, MAX_SENTIERI } from './flyconfig'
 import { forecastState, getKp, getWeather, gridPoint, kpAt, weatherPaused, type WxPoint } from './weather'
@@ -30,7 +30,7 @@ import { nearestAccess } from './accessnear'
 import { renderAccess, type AccessData, type AccessPoint, type TrailAccess } from './access'
 import { anchorAt, buildNetwork, mergePieces, type Anchor, type Network, type NetworkFile } from './network'
 import { buildFinderGraph, findRoutes, type FinderFile, type FinderGraph, type FoundRoute } from './finder'
-import { renderFinder, type FinderView } from './finderui'
+import { reachFilters, reachHead, reachList, renderFinder, type FinderView, type ReachView } from './finderui'
 import { checkOsm, renderStatus, statusPill, verdict, type Avviso, type AvvisiFile, type OsmState, type ReportView, type StatusInput } from './status'
 import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planEmpty, planFromDoc, planPieces, planRoute, ROUTE_PREFIX, routeParts, stopLabel, toDoc, type RouteBuild, type RoutePlan, type RouteStop, type SavedRoute } from './routes'
 import { renderRouteBar, renderRouteInfo, type RouteStep, type StopsCtl } from './routeui'
@@ -425,7 +425,12 @@ map.addLayer(
 )
 // "Trova percorsi": il risultato sotto il puntatore (pezzi di sentiero + tratteggi fino a parcheggio e meta).
 map.addSource('finder-hover', { type: 'geojson', data: EMPTY_FC })
-map.addLayer({ id: 'finder-hover', type: 'line', source: 'finder-hover', filter: ['!', ['has', 'dash']], layout: round, paint: { 'line-color': HIGHLIGHT, 'line-opacity': 0.9, 'line-width': byZoom(8, 4, 12, 6, 16, 9) } })
+map.addLayer({ id: 'finder-hover', type: 'line', source: 'finder-hover', filter: ['!', ['has', 'dash']], layout: round, paint: { 'line-color': '#3B0F8C', 'line-opacity': 0.95, 'line-width': byZoom(8, 5, 12, 7, 16, 11) } })
+// "Come arrivarci": tutti i percorsi verso il punto scelto + parcheggi di partenza.
+map.addSource('reach', { type: 'geojson', data: EMPTY_FC })
+map.addLayer({ id: 'reach-casing', type: 'line', source: 'reach', filter: ['==', ['geometry-type'], 'LineString'], layout: round, paint: { 'line-color': '#ffffff', 'line-width': byZoom(8, 4, 12, 6, 16, 10) } }, 'finder-hover')
+map.addLayer({ id: 'reach-line', type: 'line', source: 'reach', filter: ['==', ['geometry-type'], 'LineString'], layout: round, paint: { 'line-color': HIGHLIGHT, 'line-opacity': 0.75, 'line-width': byZoom(8, 2, 12, 3.5, 16, 6) } }, 'finder-hover')
+map.addLayer({ id: 'reach-park', type: 'circle', source: 'reach', filter: ['has', 'park'], paint: { 'circle-radius': byZoom(8, 3, 12, 5, 16, 7), 'circle-color': '#0B6E84', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 1.5 } }, 'finder-hover')
 map.addLayer({ id: 'finder-hover-dash', type: 'line', source: 'finder-hover', filter: ['has', 'dash'], paint: { 'line-color': '#142024', 'line-width': byZoom(8, 2, 12, 3, 16, 4), 'line-dasharray': [2, 1.5] } })
 // Percorso personalizzato: tratti colorati come i sentieri, buco e ultimo pezzo tratteggiati.
 map.addSource('route', { type: 'geojson', data: EMPTY_FC })
@@ -916,6 +921,8 @@ function render(): void {
   currentMine = null
   currentWx = null
   currentStatus = null
+  reachUi = null
+  if (selection?.kind !== 'poi') paintReach(null)
   setPick3d(null)
   accessMarker.remove()
   drawRoute(selection?.kind === 'trail' && isRoute(selection.id) ? selection.id : null)
@@ -952,6 +959,7 @@ function render(): void {
             fitTrail(trails.get(id)!)
           },
           onBack: s.back ? () => select(s.back!) : undefined,
+          reach: reachSection(poi.id),
         }),
       )
     }
@@ -1136,6 +1144,141 @@ async function openFound(r: FoundRoute): Promise<void> {
   showRoute(`${ROUTE_PREFIX}${++routeSeq}`, plan, name)
 }
 
+// ---- "Come arrivarci": clic su un punto (lago, malga, cascata…) → tutti i percorsi, singoli o
+// combinati, da ogni parcheggio entro REACH_KM di cammino fino a REACH_NEAR_M dal punto. Usa gli
+// stessi filtri del pannello Filtri (lunghezza, pendenza, quota, D+, difficoltà, solo aperti).
+const REACH_KM = 10 // lunghezza massima (solo andata) se "Lunghezza max" non è impostata
+const REACH_NEAR_M = 500
+let reachUi: { poi: string; head: HTMLElement; list: HTMLElement } | null = null
+let reachCache: { poi: string; key: string; view: ReachView } | null = null
+let reachFiltersOpen = false
+let reachRun = 0
+let reachTimer = 0
+
+const reachKey = () => finderSummary() + `|${filters.lungMax ?? REACH_KM}`
+
+/** Punti dei sentieri più vicini al punto scelto (uno per sentiero, entro REACH_NEAR_M). */
+function reachTargets(poiId: string): { trail: string; m: number; poi: string; d: number }[] {
+  const ll = poiCoord.get(poiId)
+  if (!ll) return []
+  const dy = REACH_NEAR_M / 111_000
+  const dx = dy / Math.cos((ll[1] * Math.PI) / 180)
+  const out: { trail: string; m: number; poi: string; d: number }[] = []
+  for (const t of trailList) {
+    const b = t.bbox
+    if (ll[0] < b[0] - dx || ll[0] > b[2] + dx || ll[1] < b[1] - dy || ll[1] > b[3] + dy) continue
+    const line = trailLines.get(t.id)
+    if (!line) continue
+    const p = projectOnLine(line, ll)
+    if (p.d <= REACH_NEAR_M) out.push({ trail: t.id, m: p.along, poi: poiId, d: Math.round(p.d) })
+  }
+  return out
+}
+
+function reachSection(poiId: string): HTMLElement {
+  const head = h('div', {})
+  const list = h('div', {})
+  const form = reachFilters(
+    () =>
+      renderForm(filters, gruppi, () => {
+        applyFilters()
+        drawForm() // il modulo del pannello Filtri resta allineato
+      }),
+    reachFiltersOpen,
+    (o) => (reachFiltersOpen = o),
+  )
+  reachUi = { poi: poiId, head, list }
+  const cached = reachCache?.poi === poiId && reachCache.key === reachKey() ? reachCache : null
+  if (cached) {
+    drawReach(cached.view)
+    requestAnimationFrame(() => paintReach(cached.view))
+  } else void computeReach(poiId)
+  return h('section', { class: 'finder reach' }, head, form, list)
+}
+
+function drawReach(v: ReachView): void {
+  if (!reachUi) return
+  reachUi.head.replaceChildren(reachHead(v))
+  reachUi.list.replaceChildren(reachList(v, pois, trails, { run: () => {}, setOnlyView: () => {}, open: (r) => void openFound(r), hover: (r) => drawFinderHover(r) }))
+}
+
+async function computeReach(poiId: string): Promise<void> {
+  const run = ++reachRun
+  const key = reachKey()
+  const prev = reachCache?.poi === poiId ? reachCache.view.results : []
+  const view: ReachView = { state: 'running', results: prev, message: null, summary: finderSummary().replace(/^mete: [^·]*· /, '').replace(/^[^·]*km andata/, `${(filters.lungMin ?? 0).toLocaleString('it-IT')}–${(filters.lungMax ?? REACH_KM).toLocaleString('it-IT')} km andata`), radiusKm: filters.lungMax ?? REACH_KM }
+  drawReach(view)
+  try {
+    const [net, fin, prof] = await Promise.all([getNetwork(), getFinder(), getProfiles()])
+    const targets = reachTargets(poiId)
+    let res: FoundRoute[] = []
+    if (targets.length) {
+      const g = buildFinderGraph(net, fin, trailList, prof, (id) => trailLines.get(id)?.length ?? trails.get(id)?.lunghezza_m ?? 0, targets)
+      const f = filters
+      const diffOk = (t?: Trail) => !f.difficolta.size || (!!t && f.difficolta.has(t.difficolta?.startsWith('EEA') ? 'EEA' : (t.difficolta ?? '')))
+      res = await findRoutes(
+        g,
+        {
+          cats: new Set(),
+          lenMin: (f.lungMin ?? 0) * 1000,
+          lenMax: (f.lungMax ?? REACH_KM) * 1000,
+          quotaMin: f.quotaMin,
+          quotaMax: f.quotaMax,
+          dislMax: f.dislMax,
+          slopeMax: f.pendMax,
+          blocked: (id) => (f.soloAperti && closedIds.has(id)) || !diffOk(trails.get(id)),
+          bbox: null,
+          perParking: true,
+        },
+        pois,
+        poiCoord,
+        undefined,
+        () => run !== reachRun,
+      )
+    }
+    if (run !== reachRun) return
+    view.state = targets.length ? 'done' : 'error'
+    view.results = res
+    if (!targets.length) view.message = `Nessun sentiero SAT a meno di ${REACH_NEAR_M} m da questo punto.`
+  } catch (e) {
+    if (run !== reachRun) return
+    view.state = 'error'
+    view.message = `Ricerca non riuscita: ${(e as Error).message}`
+  }
+  reachCache = { poi: poiId, key, view }
+  if (reachUi?.poi !== poiId) return
+  drawReach(view)
+  paintReach(view)
+}
+
+/** Tutti i percorsi trovati sulla mappa; gli altri sentieri attenuati. */
+function paintReach(v: ReachView | null): void {
+  const src = map.getSource('reach') as GeoJSONSource | undefined
+  if (!src) return
+  const features: GeoJSON.Feature[] = []
+  for (const r of v?.results ?? []) {
+    for (const p of r.pieces) {
+      const line = trailLines.get(p.trail)
+      if (!line) continue
+      const c = sliceLine(line, Math.min(p.from, p.to), Math.max(p.from, p.to))
+      if (c.length > 1) features.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: c } })
+    }
+    features.push({ type: 'Feature', properties: { park: 1 }, geometry: { type: 'Point', coordinates: r.park.lngLat } })
+  }
+  src.setData({ type: 'FeatureCollection', features })
+  if (v && selection?.kind === 'poi') setFocus('__reach__')
+}
+
+/** Filtri cambiati con la scheda di un punto aperta: ricalcolo (con una pausa, mentre si trascina). */
+function scheduleReach(): void {
+  if (!reachUi) return
+  clearTimeout(reachTimer)
+  const poi = reachUi.poi
+  reachTimer = window.setTimeout(() => {
+    if (reachUi?.poi === poi && !(reachCache?.poi === poi && reachCache.key === reachKey())) void computeReach(poi)
+  }, 450)
+}
+
 /** Passando sopra un risultato: la linea del percorso sulla mappa. */
 function drawFinderHover(r: FoundRoute | null): void {
   const src = map.getSource('finder-hover') as GeoJSONSource | undefined
@@ -1213,6 +1356,7 @@ function applyFilters(fromWeather = false): void {
   if (filters.pendMax != null && !finderData) void getFinder().then(() => applyFilters(), () => showToast('Dati di pendenza non disponibili.'))
   if (filters.parcheggio && !accessData) void getAccess().then(() => applyFilters())
   drawFinder()
+  scheduleReach()
   const cov = doneCoverage()
   doneSet = new Set([...cov].filter(([, c]) => c.complete).map(([id]) => id))
   startedSet = new Set([...cov].filter(([, c]) => !c.complete).map(([id]) => id))
@@ -1513,7 +1657,7 @@ let startedSet = new Set<string>() // iniziati ma non finiti
 type SavedTab = 'miei' | 'bacheche'
 let savedTab: SavedTab = 'miei'
 let currentBoard: string | null = null
-const boardUi = new Map<string, { openNotes: Set<string>; lastLink: { url: string | null } }>()
+const boardUi = new Map<string, { openNotes: Set<string>; lastLink: { url: string | null }; panel: { open: BoardPanel | null } }>()
 let onboardingStep = 0
 let onboardingClosed = false // saltato in questa visita, in attesa che arrivi il salvataggio
 
@@ -2796,9 +2940,9 @@ function renderBoardView(): void {
   const active = document.activeElement
   if (active && body.contains(active) && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && active.value) return
   $('board-title').textContent = board.nome
-  if (!boardUi.has(board.id)) boardUi.set(board.id, { openNotes: new Set(), lastLink: { url: null } })
+  if (!boardUi.has(board.id)) boardUi.set(board.id, { openNotes: new Set(), lastLink: { url: null }, panel: { open: null } })
   const ui = boardUi.get(board.id)!
-  const ctx = { board, me: acct?.user?.uid ?? '', info: trailInfo(), a: boardsActions(), rerender: renderBoardView, openNotes: ui.openNotes, lastLink: ui.lastLink }
+  const ctx = { board, me: acct?.user?.uid ?? '', info: trailInfo(), a: boardsActions(), rerender: renderBoardView, openNotes: ui.openNotes, lastLink: ui.lastLink, panel: ui.panel }
   body.replaceChildren(...renderBoard(ctx))
 }
 

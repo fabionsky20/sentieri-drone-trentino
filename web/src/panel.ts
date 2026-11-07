@@ -291,6 +291,7 @@ export interface PoiView {
   photos: HTMLElement
   onTrail: (id: string) => void
   onBack?: () => void
+  reach?: HTMLElement // "Come arrivarci": percorsi da tutti i parcheggi vicini, riempito da chi chiama
 }
 
 function backButton(text: string, onBack: () => void): HTMLElement {
@@ -308,6 +309,7 @@ export function renderPoi(v: PoiView): HTMLElement {
     h('h2', { class: 'title' }, poi.nome),
   )
   if (poi.ele) root.append(h('div', { class: 'tiles two' }, tile('QUOTA', `${intIt(poi.ele)} m`)))
+  if (v.reach) root.append(v.reach)
   if (v.near.length) {
     const list = h('ul', { class: 'linklist' })
     for (const n of v.near) {

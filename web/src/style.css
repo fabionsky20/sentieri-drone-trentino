@@ -4071,3 +4071,54 @@ button.pill.statuspill { cursor: pointer; font: inherit; font-size: 13px; font-w
 @media (max-width: 420px) {
   .reportrow { grid-template-columns: 1fr; }
 }
+
+/* ---- bacheca: membri / invita / impostazioni a tendina ---- */
+.stackbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ink);
+}
+.board-toolwrap { display: grid; gap: 10px; }
+.board-tools {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  padding: 8px 0;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+.toolbtn {
+  flex: 1 1 0;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.toolbtn.on { border-color: var(--accent); color: var(--accent); background: var(--panel2); }
+.toolbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.board-panel {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--panel2);
+}
+.board-panel > section { margin: 0; }

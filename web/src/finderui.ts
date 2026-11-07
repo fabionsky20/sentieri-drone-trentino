@@ -57,7 +57,63 @@ export function renderFinder(v: FinderView, pois: Map<string, PoiProps>, trails:
   return sec
 }
 
-function card(r: FoundRoute, pois: Map<string, PoiProps>, trails: Map<string, Trail>, a: FinderActions): HTMLElement {
+export interface ReachView {
+  state: 'running' | 'done' | 'error'
+  results: FoundRoute[]
+  message: string | null
+  summary: string
+  radiusKm: number
+}
+
+/** "Come arrivarci" (scheda di un punto): intestazione, filtri (nodo fisso, non ridisegnato mentre
+ *  si trascinano i cursori) e risultati. Chi chiama tiene i tre pezzi e ridisegna solo quelli che cambiano. */
+export function reachHead(v: ReachView): HTMLElement {
+  const n = v.results.length
+  return h(
+    'div',
+    {},
+    h('div', { class: 'section-head' }, h('p', { class: 'section-label' }, v.state === 'done' ? `Come arrivarci · ${n} ${n === 1 ? 'percorso' : 'percorsi'}` : 'Come arrivarci')),
+    h('p', { class: 'hint' }, `Da ogni parcheggio entro ${v.radiusKm.toLocaleString('it-IT')} km di cammino: il percorso più breve che arriva a meno di ${SPUR_TXT} dal punto, anche unendo sentieri diversi. Lunghezza = solo andata. Sulla mappa sono evidenziati tutti.`),
+    h('p', { class: 'small mono finder-sum' }, v.summary),
+  )
+}
+
+export function reachFilters(form: () => HTMLElement, open: boolean, onToggle: (open: boolean) => void): HTMLElement {
+  const det = h('details', { class: 'wxacc reachfilters' }) as HTMLDetailsElement
+  det.open = open
+  let built = false
+  const build = () => {
+    if (built || !det.open) return
+    built = true
+    det.append(form())
+  }
+  det.addEventListener('toggle', () => {
+    onToggle(det.open)
+    build()
+  })
+  det.append(h('summary', { class: 'wxsum' }, h('span', { class: 'section-label' }, 'Filtri'), h('span', { class: 'small muted reachf-hint' }, 'lunghezza, pendenza, quota, difficoltà…'), icon('chevronRight', 18)))
+  build()
+  return det
+}
+
+export function reachList(v: ReachView, pois: Map<string, PoiProps>, trails: Map<string, Trail>, a: FinderActions): HTMLElement {
+  const sec = h('div', { class: 'reachlist' })
+  const n = v.results.length
+  if (v.state === 'running') sec.append(h('p', { class: 'muted small' }, 'Cerco i percorsi…'))
+  else if (v.state === 'error') sec.append(h('p', { class: 'warn small' }, v.message ?? 'Ricerca non riuscita.'))
+  else if (!n) sec.append(h('p', { class: 'muted small' }, 'Nessun percorso da un parcheggio con questi filtri. Prova ad allargare lunghezza o pendenza.'))
+  else {
+    const list = h('ul', { class: 'cards' })
+    for (const r of v.results.slice(0, MAX_SHOWN)) list.append(card(r, pois, trails, a, true))
+    sec.append(list)
+    if (n > MAX_SHOWN) sec.append(h('p', { class: 'small muted' }, `Mostrati i ${MAX_SHOWN} più corti; sulla mappa ci sono tutti.`))
+  }
+  return sec
+}
+
+const SPUR_TXT = '500 m'
+
+function card(r: FoundRoute, pois: Map<string, PoiProps>, trails: Map<string, Trail>, a: FinderActions, fromPark = false): HTMLElement {
   const p = pois.get(r.poi)
   const cat = p ? CATEGORIES[p.categoria] : null
   const shown = r.pieces.filter((x) => Math.abs(x.to - x.from) >= 50)
@@ -69,13 +125,17 @@ function card(r: FoundRoute, pois: Map<string, PoiProps>, trails: Map<string, Tr
     h(
       'span',
       { class: 'card-top' },
-      cat ? h('span', { class: 'mono muted' }, h('i', { class: 'dot', style: `background:${cat.color}` }), ` ${cat.label}`) : null,
+      fromPark ? h('span', { class: 'mono muted' }, r.trailsUsed > 1 ? `${r.trailsUsed} sentieri` : (trails.get(r.pieces[0].trail)?.numero ?? '')) : cat ? h('span', { class: 'mono muted' }, h('i', { class: 'dot', style: `background:${cat.color}` }), ` ${cat.label}`) : null,
       r.trailsUsed > 1 ? h('span', { class: 'pill tiny combo' }, 'COMBINATO') : null,
       h('span', { class: 'mono card-km' }, `${km(r.totalM)} km`),
     ),
-    h('span', { class: 'card-title' }, p?.nome ?? 'Meta'),
+    h('span', { class: 'card-title' }, fromPark ? (r.park.nome ? `Da ${r.park.nome}` : 'Da un parcheggio') : (p?.nome ?? 'Meta')),
     h('span', { class: 'small mono muted' }, `D+ ${it(r.dplus)} m · quota max ${it(r.qmax)} m · pendenza max ${r.slope} %`),
-    h('span', { class: 'small' }, `da ${park}${r.park.dist > 30 ? ` · ${it(r.park.dist)} m al sentiero` : ''}`),
+    fromPark
+      ? [r.park.tariffa, r.park.dist > 30 ? `${it(r.park.dist)} m dal parcheggio al sentiero` : null].some(Boolean)
+        ? h('span', { class: 'small' }, [r.park.tariffa ? `parcheggio ${r.park.tariffa}` : null, r.park.dist > 30 ? `${it(r.park.dist)} m dal parcheggio al sentiero` : null].filter(Boolean).join(' · '))
+        : null
+      : h('span', { class: 'small' }, `da ${park}${r.park.dist > 30 ? ` · ${it(r.park.dist)} m al sentiero` : ''}`),
     h('span', { class: 'small muted' }, path + (r.spur > 30 ? ` → ${it(r.spur)} m alla meta` : '')),
   )
   btn.addEventListener('click', () => a.open(r))

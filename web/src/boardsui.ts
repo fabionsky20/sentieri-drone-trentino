@@ -219,7 +219,10 @@ export interface BoardViewCtx {
   rerender: () => void
   openNotes: Set<string> // sentieri con le note aperte (resta tra un ridisegno e l'altro)
   lastLink: { url: string | null } // ultimo link creato: sopravvive ai ridisegni della vista
+  panel: { open: BoardPanel | null } // tendina aperta in fondo alla bacheca (resta tra i ridisegni)
 }
+
+export type BoardPanel = 'membri' | 'invita' | 'impostazioni' | 'esci'
 
 function itemCard(ctx: BoardViewCtx, item: BoardItem): HTMLElement {
   const { board, info, a, me } = ctx
@@ -463,7 +466,12 @@ export function renderBoard(ctx: BoardViewCtx): HTMLElement[] {
   const items = [...board.sentieri.values()].sort((x, y) => (x.data ?? '9999').localeCompare(y.data ?? '9999') || (x.aggiunto?.getTime() ?? 0) - (y.aggiunto?.getTime() ?? 0))
   const parts: (HTMLElement | null)[] = [
     coverEl(board, info, true),
-    h('div', { class: 'board-meta' }, board.ruolo ? h('span', { class: 'pill' }, RUOLO_LABEL[board.ruolo]) : null, memberStack(board)),
+    h(
+      'div',
+      { class: 'board-meta' },
+      board.ruolo ? h('span', { class: 'pill' }, RUOLO_LABEL[board.ruolo]) : null,
+      button('stackbtn', [memberStack(board), h('span', { class: 'mono small muted' }, `${board.membri.length} ${board.membri.length === 1 ? 'persona' : 'persone'}`)], () => togglePanel(ctx, 'membri'), { 'aria-label': 'Membri della bacheca', title: 'Membri' }),
+    ),
     h(
       'section',
       {},
@@ -491,15 +499,43 @@ export function renderBoard(ctx: BoardViewCtx): HTMLElement[] {
           ),
         )
       : null,
-    membersSection(ctx),
-    board.ruolo === 'owner' ? inviteSection(ctx) : null,
-    board.ruolo === 'owner'
-      ? settingsSection(ctx)
-      : button('btn-danger wide', ['ESCI DALLA BACHECA'], (b) => {
-          if (confirm(`Uscire dalla bacheca «${board.nome}»? Per rientrare servirà un nuovo invito.`)) void run(b, () => a.leaveBoard(board.id), a)
-        }),
+    boardTools(ctx),
   ]
   return parts.filter((x): x is HTMLElement => !!x)
+}
+
+/** Membri, invita, impostazioni (o esci): tasti con icona in fondo, ognuno apre la sua tendina. */
+function togglePanel(ctx: BoardViewCtx, p: BoardPanel): void {
+  ctx.panel.open = ctx.panel.open === p ? null : p
+  ctx.rerender()
+  if (ctx.panel.open) requestAnimationFrame(() => document.querySelector('.board-panel')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+}
+
+function boardTools(ctx: BoardViewCtx): HTMLElement {
+  const { board, a } = ctx
+  const owner = board.ruolo === 'owner'
+  const tools: [BoardPanel, string, string][] = [['membri', 'users', `MEMBRI · ${board.membri.length}`]]
+  if (owner) tools.push(['invita', 'userPlus', 'INVITA'], ['impostazioni', 'gear', 'IMPOSTAZIONI'])
+  else tools.push(['esci', 'logout', 'ESCI'])
+  const bar = h('div', { class: 'board-tools', role: 'toolbar', 'aria-label': 'Gestione della bacheca' })
+  for (const [p, ic, label] of tools) {
+    const on = ctx.panel.open === p
+    bar.append(button(`toolbtn${on ? ' on' : ''}`, [icon(ic, 20), h('span', {}, label)], () => togglePanel(ctx, p), { 'aria-expanded': String(on), title: label }))
+  }
+  let panel: HTMLElement | null = null
+  if (ctx.panel.open === 'membri') panel = membersSection(ctx)
+  else if (ctx.panel.open === 'invita' && owner) panel = inviteSection(ctx)
+  else if (ctx.panel.open === 'impostazioni' && owner) panel = settingsSection(ctx)
+  else if (ctx.panel.open === 'esci' && !owner)
+    panel = h(
+      'section',
+      {},
+      h('p', { class: 'muted small' }, 'Per rientrare servirà un nuovo invito.'),
+      button('btn-danger wide', ['ESCI DALLA BACHECA'], (b) => {
+        if (confirm(`Uscire dalla bacheca «${board.nome}»?`)) void run(b, () => a.leaveBoard(board.id), a)
+      }),
+    )
+  return h('div', { class: 'board-toolwrap' }, panel ? h('div', { class: 'board-panel' }, panel) : null, bar)
 }
 
 // ---------------------------------------------------------------- percorsi personalizzati

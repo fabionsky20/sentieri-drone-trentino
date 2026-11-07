@@ -80,12 +80,21 @@ function profileStats(p: Profile | undefined, a: number, b: number): Omit<Sub, '
 }
 
 /** Grafo della ricerca: rete SAT + parcheggi + punti delle mete, archi spezzati lì. */
-export function buildFinderGraph(net: Network, f: FinderFile, trails: Trail[], profiles: Record<string, Profile>, lengthOf: (id: string) => number): FinderGraph {
+export function buildFinderGraph(
+  net: Network,
+  f: FinderFile,
+  trails: Trail[],
+  profiles: Record<string, Profile>,
+  lengthOf: (id: string) => number,
+  /** Mete al posto dei POI dei sentieri (es. un solo punto scelto sulla mappa). */
+  only?: { trail: string; m: number; poi: string; d: number }[],
+): FinderGraph {
   type Pt = { m: number; kind: 'park' | 'poi'; ref: number | { poi: string; d: number } }
   const byTrail = new Map<string, Pt[]>()
   const add = (trail: string, p: Pt) => byTrail.set(trail, [...(byTrail.get(trail) ?? []), p])
   f.parcheggi.forEach((r, i) => add(r[2], { m: r[3], kind: 'park', ref: i }))
-  for (const t of trails) for (const tp of t.poi) if (tp.d <= SPUR_MAX_M) add(t.id, { m: tp.km * 1000, kind: 'poi', ref: { poi: tp.id, d: tp.d } })
+  if (only) for (const o of only) add(o.trail, { m: o.m, kind: 'poi', ref: { poi: o.poi, d: o.d } })
+  else for (const t of trails) for (const tp of t.poi) if (tp.d <= SPUR_MAX_M) add(t.id, { m: tp.km * 1000, kind: 'poi', ref: { poi: tp.id, d: tp.d } })
 
   let n = net.nodes.length
   const pos: FinderGraph['pos'] = net.nodes.map(() => ({ trail: '', m: 0 }))
@@ -150,6 +159,7 @@ export interface FindQuery {
   slopeMax: number | null // %
   blocked: (trail: string) => boolean // sentieri chiusi o di difficoltà esclusa
   bbox: [number, number, number, number] | null // solo mete in questa zona
+  perParking?: boolean // un risultato per parcheggio (tutti i modi di arrivare a una meta) invece che uno per meta
 }
 
 export interface FoundRoute {
@@ -233,14 +243,15 @@ export async function findRoutes(g: FinderGraph, q: FindQuery, pois: Map<string,
         for (const t of here) {
           const total = park.dist + d + t.d
           if (total < q.lenMin || total > q.lenMax) continue
-          const old = best.get(t.poi)
+          const key = q.perParking ? `${pi}|${u}` : t.poi
+          const old = best.get(key)
           if (old && old.totalM <= total) continue
-          const r = trace(g, prev, park, u, t, total, pois)
+          const r = trace(g, prev, park, u, t, total, pois, q.perParking ? wanted : null)
           if (!r) continue
           if (q.quotaMin != null && r.qmax < q.quotaMin) continue
           if (q.quotaMax != null && r.qmax > q.quotaMax) continue
           if (q.dislMax != null && r.dplus > q.dislMax) continue
-          best.set(t.poi, r)
+          best.set(key, r)
         }
       }
       for (const si of g.adj[u]) {
@@ -257,11 +268,20 @@ export async function findRoutes(g: FinderGraph, q: FindQuery, pois: Map<string,
     }
   }
   onProgress?.(1)
-  return [...best.values()].sort((a, b) => a.totalM - b.totalM)
+  const out = [...best.values()].sort((a, b) => a.totalM - b.totalM)
+  if (!q.perParking) return out
+  // Parcheggi diversi che finiscono sullo stesso cammino: si tiene il più corto.
+  const seen = new Set<string>()
+  return out.filter((r) => {
+    const k = r.pieces.map((p) => `${p.trail}:${Math.round(p.to / 50)}`).join('|') + `|${r.pieces[0].trail}`
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
 }
 
 /** Ricostruisce il cammino (pezzi di sentiero in ordine) e ne calcola D+, quota e pendenza. */
-function trace(g: FinderGraph, prev: Int32Array, park: Park, goal: number, t: Target, total: number, pois: Map<string, PoiProps>): FoundRoute | null {
+function trace(g: FinderGraph, prev: Int32Array, park: Park, goal: number, t: Target, total: number, pois: Map<string, PoiProps>, skipThrough: Map<number, Target[]> | null): FoundRoute | null {
   const raw: Piece[] = []
   let dplus = 0
   let qmax = -Infinity
@@ -278,6 +298,8 @@ function trace(g: FinderGraph, prev: Int32Array, park: Park, goal: number, t: Ta
     qmax = Math.max(qmax, s.qmax)
     slope = Math.max(slope, s.slope)
     u = fwd ? s.a : s.b
+    // passa prima da un altro punto d'arrivo: quel percorso (più corto) è già tra i risultati
+    if (skipThrough && u !== park.node && skipThrough.has(u)) return null
   }
   raw.reverse()
   const pieces = mergePieces(raw)
