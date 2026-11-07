@@ -13,6 +13,7 @@ Legge i file più recenti in data/raw/ e scrive in data/processed/:
 - profiles.json      profilo altimetrico ridotto per sentiero
 - search.json        indice per la ricerca testuale
 - closures.json      chiusure per sentiero, da data/closures.yaml
+- finder.json        parcheggi agganciati alla rete e pendenze (percorsi combinati, pipeline/finder.py)
 e aggiorna lo scheletro di data/authorities.yaml.
 
 Scarica da internet solo ciò che manca nelle cache (POI OSM, tile DEM).
@@ -31,7 +32,7 @@ import geopandas as gpd
 import shapely
 from shapely.geometry import box
 
-from . import access, authorities, closures, config, dem, dflight, enrich, network, osm, sat, segments
+from . import access, authorities, closures, config, dem, dflight, enrich, finder, network, osm, sat, segments
 
 
 def write_geojson(gdf: gpd.GeoDataFrame, name: str, tolerance: float) -> int:
@@ -196,6 +197,9 @@ def main() -> int:
         **({"accesso": access.meta()} if accessi else {}),
     })
     sizes["meta.json"] = write_json(meta, "meta.json")
+    # Ricerca dei percorsi combinati e pendenze: legge i file appena scritti.
+    if access.PARKING_FILE.exists():
+        sizes["finder.json"] = finder.write()
 
     n_total, n_added = authorities.update(zones[zones.sui_sentieri])
     print(f"authorities.yaml: {n_total} zone ({n_added} aggiunte)")

@@ -1,11 +1,16 @@
 # Build della web app a ogni push su main; deploy su GitHub Pages solo se la
 # variabile di repository DEPLOY_PAGES vale "true" (Settings → Secrets and variables
 # → Actions → Variables). I dati arrivano già pronti da data/processed/ (versionati).
+# Ogni giorno (e a ogni push) si aggiornano anche gli avvisi di chiusura dei sentieri
+# (pipeline/avvisi.py: comunicati della Provincia e notizie): non sono versionati, finiscono
+# solo nel sito pubblicato. Se le fonti non rispondono la build va avanti lo stesso.
 name: Build e deploy
 
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '17 4 * * *' # ogni mattina, ~5:17 ora italiana
   workflow_dispatch:
 
 permissions:
@@ -22,6 +27,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # Avvisi già letti nei giorni scorsi (così si tengono anche quelli più vecchi della finestra).
+      - uses: actions/cache@v4
+        with:
+          path: data/raw/avvisi
+          key: avvisi-${{ github.run_id }}
+          restore-keys: avvisi-
+      - name: Avvisi di chiusura (Provincia, notizie)
+        run: python3 -m pipeline.avvisi
+        continue-on-error: true
+        timeout-minutes: 15
       - uses: actions/setup-node@v5
         with:
           node-version: 24

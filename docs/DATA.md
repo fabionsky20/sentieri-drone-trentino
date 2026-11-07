@@ -312,3 +312,24 @@ da strade). Provare un'altra tolleranza: `python -m pipeline.network 30`.
 2. ~~Dislivello cumulato e profilo~~ → risolto in fase 4 con il DEM Mapterhorn (LiDAR PAT).
 3. Contatti enti per i permessi → `data/authorities.yaml` manuale.
 4. Nome leggibile per il 64% dei sentieri → nome sintetico da località di partenza e arrivo.
+
+
+## 9. finder.json (percorsi combinati e pendenze)
+
+Prodotto da `pipeline/finder.py` (anche da solo: `python -m pipeline.finder`, legge solo file già pronti).
+
+- `parcheggi`: `[lon, lat, sentiero, m, distanza_m, nome, tariffa]` — parcheggi OSM pubblici entro 400 m da un sentiero, agganciati al punto più vicino (m lungo il sentiero, scala della pipeline). Sullo stesso sentiero, parcheggi a meno di 120 m l'uno dall'altro: si tiene il più vicino.
+- `archi`: per ogni arco di `network.json` (stesso ordine) `[pendenza max %, quota min, quota max]`.
+- `sentieri`: pendenza massima (%) di ogni sentiero, per il filtro "Pendenza max".
+
+Pendenza = dislivello su finestre di ~100 m del profilo LiDAR, in valore assoluto (conta anche in discesa).
+Nel browser (`web/src/finder.ts`) il grafo della rete viene spezzato nei punti dei parcheggi e delle mete
+(POI dei sentieri entro 400 m) e da ogni parcheggio si cerca il cammino più breve (Dijkstra) usando solo
+i tratti ammessi dai filtri. Lunghezza = solo andata (parcheggio → sentiero → meta).
+
+## 10. avvisi.json (chiusure da comunicati e notizie)
+
+Prodotto ogni giorno dalla GitHub Action con `pipeline/avvisi.py` (solo libreria standard), **non versionato**.
+`avvisi`: `{fonte: provincia|notizie, data, titolo, url, stato: chiuso|riaperto|info, forte: [id], debole: [id]}`.
+`forte` = il testo cita il numero SAT; `debole` = cita un luogo d'inizio/fine abbastanza specifico.
+`fonti.<nome>.ok` = la fonte ha risposto. Cache tra le esecuzioni in `data/raw/avvisi/` (actions/cache).

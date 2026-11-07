@@ -118,6 +118,7 @@ export interface RouteBuild {
   pieces: Piece[] // tutti i pezzi in ordine (anche dopo il buco)
   walkedM: number // metri su sentiero (senza buchi e deviazioni)
   straight: { from: number; to: number }[] // pezzi in linea retta (buchi, deviazioni fino alle mete), in m lungo `line`
+  placed: { trail: string; from: number; to: number; at: number }[] // ogni pezzo SAT con la sua posizione (m) lungo `line`
 }
 
 export interface RouteCtx {
@@ -146,6 +147,7 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
   const poi: TrailPoi[] = []
   const used = new Set<string>()
   const straight: RouteBuild['straight'] = []
+  const placed: RouteBuild['placed'] = []
   /** Pezzo in linea retta nella geometria e nel profilo (quota interpolata). */
   const addStraight = (pts: [number, number][], meters: number, qa: number | undefined, qb: number | null) => {
     push(pts)
@@ -168,6 +170,7 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
     const lo = Math.min(p.from, p.to)
     const hi = Math.max(p.from, p.to)
     const fwd = p.to >= p.from
+    placed.push({ trail: p.trail, from: p.from, to: p.to, at: pos })
     const pts = sliceLine(line, lo, hi)
     push(fwd ? pts : pts.reverse())
     // tratti D-Flight (stessi id dei segmenti: colori e NOTAM per data)
@@ -267,7 +270,24 @@ export function buildRoute(id: string, name: string, plan: RoutePlan, c: RouteCt
     quota_min_dem: Math.round(Math.min(...qq)),
     quota_max_dem: Math.round(Math.max(...qq)),
   }
-  return { trail, line, profile, pieces: allPieces, walkedM: walked, straight }
+  return { trail, line, profile, pieces: allPieces, walkedM: walked, straight, placed }
+}
+
+/** Tratti SAT coperti da una parte del percorso (m lungo la linea del percorso, da `a` a `b`). */
+export function routeParts(b: Pick<RouteBuild, 'placed'>, a: number, z: number): { s: string; a: number; b: number }[] {
+  const out: { s: string; a: number; b: number }[] = []
+  const [lo, hi] = [Math.min(a, z), Math.max(a, z)]
+  for (const p of b.placed) {
+    const len = Math.abs(p.to - p.from)
+    const x0 = Math.max(lo, p.at)
+    const x1 = Math.min(hi, p.at + len)
+    if (x1 - x0 < 1) continue
+    const dir = p.to >= p.from ? 1 : -1
+    const m0 = p.from + dir * (x0 - p.at)
+    const m1 = p.from + dir * (x1 - p.at)
+    out.push({ s: p.trail, a: Math.round(Math.min(m0, m1) * 10) / 10, b: Math.round(Math.max(m0, m1) * 10) / 10 })
+  }
+  return out
 }
 
 /** "km 3,2 di E325" (o nome della località se è un estremo del sentiero). */

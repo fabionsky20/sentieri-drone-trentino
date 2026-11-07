@@ -19,7 +19,9 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -74,8 +76,22 @@ export interface AccountState {
   uscite: Outing[] // sentieri fatti, dalla più recente (private)
   note: Map<string, string> // sentiero → nota personale (privata)
   percorsi: SavedRoute[] // percorsi personalizzati salvati ("I miei"), dal più recente
+  segnalazioni: Report[] // stato dei sentieri segnalato dagli utenti dell'app (condiviso), dal più recente
   errore?: string
 }
+
+/** Segnalazione sul posto: "chiuso", "pericolo" (si passa con attenzione) o "aperto" (verificato). */
+export interface Report {
+  id: string
+  sentiero: string
+  stato: 'chiuso' | 'pericolo' | 'aperto'
+  nota: string | null
+  data: string // AAAA-MM-GG, giorno in cui si è visto
+  autore: string // uid
+  nome: string
+  creato: Date | null
+}
+export type ReportInput = Pick<Report, 'sentiero' | 'stato' | 'nota' | 'data'>
 
 import { purgeBoardsData, startBoards, stopBoards } from './boards'
 import type { Outing, OutingInput } from './outings'
@@ -95,6 +111,7 @@ const EMPTY = (): Omit<AccountState, 'status' | 'user'> => ({
   uscite: [],
   note: new Map(),
   percorsi: [],
+  segnalazioni: [],
 })
 let state: AccountState = { status: 'caricamento', user: null, ...EMPTY() }
 const listeners = new Set<(s: AccountState) => void>()
@@ -283,6 +300,11 @@ async function start(user: User): Promise<void> {
               partenza: d.get('partenza') === 'fine' ? ('fine' as const) : ('inizio' as const),
               finoM: d.get('fino_m') ?? null,
               ar: d.get('ar') === true,
+              percorso: d.get('percorso') ?? null,
+              percorsoNome: d.get('percorso_nome') ?? null,
+              tratti: Array.isArray(d.get('tratti')) ? (d.get('tratti') as { s: string; a: number; b: number }[]) : null,
+              percorsoKm: d.get('percorso_km') ?? null,
+              percorsoDplus: d.get('percorso_dplus') ?? null,
             }))
             .sort((a, b) => b.data.localeCompare(a.data)),
         }),
@@ -309,6 +331,24 @@ async function start(user: User): Promise<void> {
             .sort((a, b) => (b.aggiunto?.getTime() ?? 0) - (a.aggiunto?.getTime() ?? 0)),
         }),
       fail,
+    ),
+    // Segnalazioni di tutti gli utenti (le più recenti): servono a tutti per lo stato dei sentieri.
+    onSnapshot(
+      query(collection(db, 'segnalazioni'), orderBy('creato', 'desc'), limit(1000)),
+      (s) =>
+        emit({
+          segnalazioni: s.docs.map((d) => ({
+            id: d.id,
+            sentiero: String(d.get('sentiero')),
+            stato: d.get('stato') as Report['stato'],
+            nota: d.get('nota') ?? null,
+            data: String(d.get('data')),
+            autore: String(d.get('autore')),
+            nome: String(d.get('nome') ?? ''),
+            creato: toDate(d.get('creato')),
+          })),
+        }),
+      () => {}, // regole non ancora pubblicate: le segnalazioni mancano, il resto funziona
     ),
     onSnapshot(
       collection(db, 'users', uid, 'note'),
@@ -457,6 +497,16 @@ export async function saveOuting(o: OutingInput, id?: string): Promise<void> {
     partenza: o.parziale ? o.partenza : null,
     fino_m: o.parziale && o.finoM != null ? Math.round(o.finoM) : null,
     ar: o.ar,
+    // Uscita su un percorso personalizzato: tratti SAT fatti, km e D+ della parte fatta.
+    ...(o.tratti?.length
+      ? {
+          percorso: o.percorso,
+          percorso_nome: o.percorsoNome?.slice(0, 80) ?? null,
+          tratti: o.tratti.slice(0, 200).map((t) => ({ s: t.s, a: Math.round(t.a * 10) / 10, b: Math.round(t.b * 10) / 10 })),
+          percorso_km: o.percorsoKm == null ? null : Math.round(o.percorsoKm * 100) / 100,
+          percorso_dplus: o.percorsoDplus == null ? null : Math.round(o.percorsoDplus),
+        }
+      : {}),
     ...(id ? {} : { creato: serverTimestamp() }),
     aggiornato: serverTimestamp(),
   }, { merge: !!id })
@@ -505,6 +555,26 @@ export async function remove(list: ListName, trailId: string): Promise<void> {
   await deleteDoc(list === 'miei' ? doc(db, 'users', u, 'saved', trailId) : doc(db, 'condivisi', trailId))
 }
 
+// ---------------------------------------------------------------- segnalazioni (condivise)
+
+/** Segnala lo stato di un sentiero visto sul posto. Visibile a tutti gli utenti dell'app. */
+export async function saveReport(r: ReportInput): Promise<void> {
+  const u = uid()
+  await setDoc(doc(collection(db, 'segnalazioni')), {
+    sentiero: r.sentiero,
+    stato: r.stato,
+    nota: r.nota?.trim().slice(0, 300) || null,
+    data: r.data,
+    autore: u,
+    nome: (state.profile?.nome ?? state.user?.nome ?? 'utente').slice(0, 60),
+    creato: serverTimestamp(),
+  })
+}
+
+export async function deleteReport(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'segnalazioni', id))
+}
+
 // ---------------------------------------------------------------- eliminazione account
 
 /** Cancella TUTTI i dati dell'utente (profilo, droni, salvati, vecchi salvati, contributi alla
@@ -526,6 +596,7 @@ export async function deleteAccount(): Promise<void> {
     ...(await getDocs(collection(db, 'users', u, 'uscite'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'users', u, 'note'))).docs.map((d) => d.ref),
     ...(await getDocs(collection(db, 'users', u, 'percorsi'))).docs.map((d) => d.ref),
+    ...(await getDocs(query(collection(db, 'segnalazioni'), where('autore', '==', u)))).docs.map((d) => d.ref),
   ]
   // Il mio codice di invito e la mia voce tra gli amici di chi mi ha invitato.
   if (state.profile?.invito_codice) refs.push(doc(db, 'codiciInvito', state.profile.invito_codice))

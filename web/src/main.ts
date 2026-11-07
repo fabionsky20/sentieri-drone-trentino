@@ -21,15 +21,18 @@ import { LISTA_METEO, MAX_SENTIERI } from './flyconfig'
 import { forecastState, getKp, getWeather, gridPoint, kpAt, weatherPaused, type WxPoint } from './weather'
 import { renderWeather, volChip, type WxPointView, type WxStatus } from './weatherui'
 import { applyRoute, gpxDraft, newDraft, renderMyTrail, renderStats, type OutingActions, type OutingDraft, type Person } from './outingsui'
-import { coverage, elevAt, nearestTrail, parseGpx, proposeFromGpx, type GpxTrack, type Outing } from './outings'
+import { coverage, coverageOf, elevAt, nearestTrail, outingDplus, outingKm, outingParts, outingRange, parseGpx, proposeFromGpx, type GpxTrack } from './outings'
 import { avatarEl, expiries, renderOnboarding as renderOnboarding_, renderProfilePage, renderWelcomeInvite, validDate, type ProfileActions } from './profilepage'
 import { rank } from './search'
 import { buildTrailLines, pointAt, projectOnLine, sliceLine } from './trailgeom'
 import { debug as flyDebug, demElevation, startPreview, type PreviewPoi } from './preview3d'
 import { nearestAccess } from './accessnear'
 import { renderAccess, type AccessData, type AccessPoint, type TrailAccess } from './access'
-import { anchorAt, buildNetwork, type Anchor, type Network, type NetworkFile } from './network'
-import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planEmpty, planFromDoc, planRoute, ROUTE_PREFIX, stopLabel, toDoc, type RouteBuild, type RoutePlan, type RouteStop, type SavedRoute } from './routes'
+import { anchorAt, buildNetwork, mergePieces, type Anchor, type Network, type NetworkFile } from './network'
+import { buildFinderGraph, findRoutes, type FinderFile, type FinderGraph, type FoundRoute } from './finder'
+import { renderFinder, type FinderView } from './finderui'
+import { checkOsm, renderStatus, statusPill, verdict, type Avviso, type AvvisiFile, type OsmState, type ReportView, type StatusInput } from './status'
+import { buildRoute, isRoute, labelOf, nearestAnchor, piecesText, planEmpty, planFromDoc, planPieces, planRoute, ROUTE_PREFIX, routeParts, stopLabel, toDoc, type RouteBuild, type RoutePlan, type RouteStop, type SavedRoute } from './routes'
 import { renderRouteBar, renderRouteInfo, type RouteStep, type StopsCtl } from './routeui'
 import type {
   Colore,
@@ -136,6 +139,18 @@ const [segments, zonesFC, trailList, meta, poisFC, valleysFC, closures] = await 
   showToast(`Errore nel caricamento dei dati: ${err.message}`, 0)
   throw err
 })
+// Avvisi di chiusura (Provincia, notizie): file generato ogni giorno dalla GitHub Action. In
+// sviluppo può mancare: la scheda lo dice ("non disponibile").
+let avvisiData: AvvisiFile | null | undefined = undefined
+let appReady = false // fine dell'avvio: prima, applyDay() finale userà già gli avvisi arrivati
+const avvisiBy = new Map<string, Avviso[]>()
+load<AvvisiFile>('avvisi.json')
+  .then((d) => (avvisiData = d))
+  .catch(() => (avvisiData = null))
+  .then(() => {
+    for (const a of avvisiData?.avvisi ?? []) for (const id of [...a.forte, ...a.debole]) avvisiBy.set(id, [...(avvisiBy.get(id) ?? []), a])
+    if (appReady) applyDay()
+  })
 $('status').hidden = true
 // Attribuzioni delle mappe: chiuse all'avvio (resta il pulsante ⓘ), così non coprono la legenda.
 map.once('idle', () => document.querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show'))
@@ -154,6 +169,16 @@ const getAccess = () =>
   (accessP ??= load<AccessData>('access.json')
     .catch(() => ({}) as AccessData) // dati non ancora generati: la sezione lo dice, senza errori
     .then((d) => (accessData = d)))
+// Ricerca di percorsi combinati e filtri di pendenza/parcheggio: si carica al primo uso.
+let finderP: Promise<FinderFile> | null = null
+let finderData: FinderFile | null = null
+const getFinder = () =>
+  (finderP ??= load<FinderFile>('finder.json')
+    .then((d) => (finderData = d))
+    .catch((e) => {
+      finderP = null
+      throw e
+    }))
 let searchP: Promise<SearchItem[]> | null = null
 const getSearch = () => (searchP ??= load<SearchItem[]>('search.json'))
 
@@ -398,6 +423,10 @@ map.addLayer(
   },
   FIRST_LABEL,
 )
+// "Trova percorsi": il risultato sotto il puntatore (pezzi di sentiero + tratteggi fino a parcheggio e meta).
+map.addSource('finder-hover', { type: 'geojson', data: EMPTY_FC })
+map.addLayer({ id: 'finder-hover', type: 'line', source: 'finder-hover', filter: ['!', ['has', 'dash']], layout: round, paint: { 'line-color': HIGHLIGHT, 'line-opacity': 0.9, 'line-width': byZoom(8, 4, 12, 6, 16, 9) } })
+map.addLayer({ id: 'finder-hover-dash', type: 'line', source: 'finder-hover', filter: ['has', 'dash'], paint: { 'line-color': '#142024', 'line-width': byZoom(8, 2, 12, 3, 16, 4), 'line-dasharray': [2, 1.5] } })
 // Percorso personalizzato: tratti colorati come i sentieri, buco e ultimo pezzo tratteggiati.
 map.addSource('route', { type: 'geojson', data: EMPTY_FC })
 // Stessa evidenziazione del sentiero aperto: violetto con bordo bianco e filo del colore del volo.
@@ -541,6 +570,7 @@ function applyDay(): void {
   ;(map.getSource('zones') as GeoJSONSource).setData(zonesFC)
 
   closedIds = new Set(Object.entries(closures).filter(([, list]) => list.some((c) => isClosedOn(c, day))).map(([id]) => id))
+  for (const id of reportedClosed()) closedIds.add(id)
 
   const notam = [...zones.values()].filter((z) => !z.permanente && z.sui_sentieri && isActive(z, day)).length
   $('notam-chip').hidden = !notam
@@ -839,11 +869,15 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
   const wxBox = h('section', { class: 'wxbox' })
   currentWx = { trailId: trail.id, box: wxBox }
   renderWeatherBox()
+  const statusPillHost = h('span', { class: 'statuspill-host' })
+  const statusBox = h('section', { class: 'statusbox' })
+  if (trail.id !== lastStatusTrail) statusOpen = false
+  lastStatusTrail = trail.id
+  currentStatus = { trailId: trail.id, pill: statusPillHost, box: statusBox }
+  renderStatusBox()
   const myBox = h('section', { class: 'mybox' })
-  if (!route) {
-    currentMine = { trailId: trail.id, box: myBox }
-    renderMyTrailBox(true)
-  }
+  currentMine = { trailId: trail.id, box: myBox }
+  renderMyTrailBox(true)
   return renderTrail({
     trail,
     day,
@@ -858,7 +892,8 @@ function trailPanel(trail: Trail, segId?: string): HTMLElement {
     pois,
     profile: profileBox,
     photos: photosSection(photoPoints, 1500),
-    mine: route ? undefined : myBox,
+    mine: myBox,
+    status: { pill: statusPillHost, box: statusBox },
     weather: wxBox,
     preview: flyBox,
     access: accBox,
@@ -880,6 +915,7 @@ function render(): void {
   map.setFilter('poi-sel', ['==', ['get', 'id'], selection?.kind === 'poi' ? selection.id : ''])
   currentMine = null
   currentWx = null
+  currentStatus = null
   setPick3d(null)
   accessMarker.remove()
   drawRoute(selection?.kind === 'trail' && isRoute(selection.id) ? selection.id : null)
@@ -972,6 +1008,157 @@ document.addEventListener('keydown', (e) => {
 
 // ---------------------------------------------------------------- filtri
 
+// ---- percorsi combinati ("Trova percorsi", finder.ts)
+const FINDER_LEN_MAX_KM = 15 // senza "Lunghezza max": cerca fino a qui (solo andata)
+const finderView: FinderView = { state: 'idle', progress: 0, results: [], message: null, onlyView: stored('finder-zona', true), summary: '' }
+let finderGraph: FinderGraph | null = null
+let finderRun = 0
+
+function finderSummary(): string {
+  const f = filters
+  const cats = [...f.vicino].map((c) => CATEGORIES[c].plural.toLowerCase())
+  const parts = [
+    cats.length ? `mete: ${cats.join(', ')}` : 'mete: tutte',
+    `${(f.lungMin ?? 0).toLocaleString('it-IT')}–${(f.lungMax ?? FINDER_LEN_MAX_KM).toLocaleString('it-IT')} km andata`,
+    f.quotaMin != null || f.quotaMax != null ? `quota ${f.quotaMin ?? 0}–${f.quotaMax ?? '∞'} m` : null,
+    f.dislMax != null ? `D+ ≤ ${f.dislMax} m` : null,
+    f.pendMax != null ? `pendenza ≤ ${f.pendMax} %` : null,
+    f.difficolta.size ? `difficoltà ${[...f.difficolta].join('/')}` : null,
+    f.soloAperti ? 'solo aperti' : null,
+  ]
+  return parts.filter(Boolean).join(' · ')
+}
+
+function drawFinder(): void {
+  const sum = finderSummary()
+  // Filtri cambiati dopo una ricerca: i risultati non valgono più.
+  if (finderView.state === 'done' && finderView.summary && sum !== finderView.summary) {
+    finderView.state = 'idle'
+    finderView.results = []
+    finderView.message = 'Filtri cambiati: premi di nuovo TROVA PERCORSI.'
+    drawFinderHover(null)
+  }
+  finderView.summary = sum
+  const el = document.getElementById('finder-section')
+  if (!el) return
+  el.replaceChildren(
+    renderFinder(finderView, pois, trails, {
+      run: () => void runFinder(),
+      setOnlyView: (on) => {
+        finderView.onlyView = on
+        store('finder-zona', on)
+      },
+      open: (r) => void openFound(r),
+      hover: (r) => drawFinderHover(r),
+    }),
+  )
+}
+
+async function runFinder(): Promise<void> {
+  const run = ++finderRun
+  finderView.state = 'running'
+  finderView.progress = 0
+  finderView.message = null
+  drawFinder()
+  try {
+    const [net, fin, prof] = await Promise.all([getNetwork(), getFinder(), getProfiles()])
+    finderGraph ??= buildFinderGraph(net, fin, trailList, prof, (id) => trailLines.get(id)?.length ?? trails.get(id)?.lunghezza_m ?? 0)
+    const f = filters
+    const b = map.getBounds()
+    const diffOk = (t?: Trail) => !f.difficolta.size || (!!t && f.difficolta.has(t.difficolta?.startsWith('EEA') ? 'EEA' : (t.difficolta ?? '')))
+    const res = await findRoutes(
+      finderGraph,
+      {
+        cats: new Set(f.vicino),
+        lenMin: (f.lungMin ?? 0) * 1000,
+        lenMax: (f.lungMax ?? FINDER_LEN_MAX_KM) * 1000,
+        quotaMin: f.quotaMin,
+        quotaMax: f.quotaMax,
+        dislMax: f.dislMax,
+        slopeMax: f.pendMax,
+        blocked: (id) => (f.soloAperti && closedIds.has(id)) || !diffOk(trails.get(id)),
+        bbox: finderView.onlyView ? [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] : null,
+      },
+      pois,
+      poiCoord,
+      (p) => {
+        if (run !== finderRun) return
+        finderView.progress = p
+        const btn = document.querySelector<HTMLButtonElement>('.finder .btn-primary')
+        if (btn) btn.textContent = `CERCO… ${Math.round(p * 100)} %`
+      },
+      () => run !== finderRun,
+    )
+    if (run !== finderRun) return
+    finderView.results = res
+    finderView.state = 'done'
+  } catch (e) {
+    finderView.state = 'error'
+    finderView.message = `Ricerca non riuscita: ${(e as Error).message}`
+  }
+  drawFinder()
+}
+
+/** Apre un percorso trovato come percorso personalizzato (scheda, profilo, meteo, 3D, salvataggio). */
+async function openFound(r: FoundRoute): Promise<void> {
+  drawFinderHover(null)
+  const [net] = await Promise.all([getNetwork(), getProfiles()])
+  const at = (trail: string, m: number) => {
+    const line = trailLines.get(trail)
+    return line ? anchorAt(net, trail, m, pointAt(line, m)) : null
+  }
+  const start = at(r.start.trail, r.start.m)
+  const end = at(r.end.trail, r.end.m)
+  const poi = pois.get(r.poi)
+  const ll = poiCoord.get(r.poi)
+  if (!start || !end || !poi || !ll) {
+    showToast('Percorso non apribile.')
+    return
+  }
+  const last: RouteStop = { anchor: end, poi: { id: poi.id, nome: poi.nome, lngLat: ll } }
+  let plan = planRoute(net, trailLines, [{ anchor: start }, last])
+  // Il calcolo normale non conosce i filtri (pendenza, chiusure): se sceglie un'altra strada,
+  // si aggiungono punti intermedi a metà dei pezzi trovati, così il percorso resta quello.
+  const same = (a: { trail: string; from: number; to: number }[], b: typeof a) => a.length === b.length && a.every((p, i) => p.trail === b[i].trail && Math.abs(p.from - b[i].from) < 20 && Math.abs(p.to - b[i].to) < 20)
+  if (!same(mergePieces(planPieces(plan)), r.pieces)) {
+    const mids = r.pieces
+      .map((p, i) => ({ p, i, len: Math.abs(p.to - p.from) }))
+      .filter((x) => x.len > 60)
+      .sort((x, y) => y.len - x.len)
+      .slice(0, 8)
+      .sort((x, y) => x.i - y.i)
+      .map((x) => at(x.p.trail, (x.p.from + x.p.to) / 2))
+      .filter((a): a is Anchor => !!a)
+    plan = planRoute(net, trailLines, [{ anchor: start }, ...mids.map((anchor) => ({ anchor })), last])
+  }
+  const name = `${poi.nome} da ${r.park.nome || 'parcheggio'}`.slice(0, 80)
+  if (mobile()) setTab('map')
+  showRoute(`${ROUTE_PREFIX}${++routeSeq}`, plan, name)
+}
+
+/** Passando sopra un risultato: la linea del percorso sulla mappa. */
+function drawFinderHover(r: FoundRoute | null): void {
+  const src = map.getSource('finder-hover') as GeoJSONSource | undefined
+  if (!src) return
+  const features: GeoJSON.Feature[] = []
+  if (r) {
+    for (const p of r.pieces) {
+      const line = trailLines.get(p.trail)
+      if (!line) continue
+      const c = sliceLine(line, Math.min(p.from, p.to), Math.max(p.from, p.to))
+      if (c.length > 1) features.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: c } })
+    }
+    const ll = poiCoord.get(r.poi)
+    const first = r.pieces[0]
+    const startLine = trailLines.get(first.trail)
+    if (startLine) features.push({ type: 'Feature', properties: { dash: 1 }, geometry: { type: 'LineString', coordinates: [r.park.lngLat, pointAt(startLine, first.from)] } })
+    const lastP = r.pieces[r.pieces.length - 1]
+    const endLine = trailLines.get(lastP.trail)
+    if (ll && endLine) features.push({ type: 'Feature', properties: { dash: 1 }, geometry: { type: 'LineString', coordinates: [pointAt(endLine, lastP.to), ll] } })
+  }
+  src.setData({ type: 'FeatureCollection', features })
+}
+
 $('filters-reset').addEventListener('click', () => {
   Object.assign(filters, defaultFilters())
   drawForm()
@@ -1015,7 +1202,17 @@ function cardFor(t: Trail, extra: { who?: string | null; onRemove?: () => void }
   })
 }
 
+/** Parcheggio pubblico vicino all'inizio o alla fine del sentiero (come "Come arrivare"). */
+const hasParking = (id: string) => {
+  const a = accessData?.[id] as TrailAccess | undefined
+  return a?.inizio?.tipo === 'parcheggio' || a?.fine?.tipo === 'parcheggio'
+}
+
 function applyFilters(fromWeather = false): void {
+  // Pendenza e parcheggio hanno bisogno di dati caricati al primo uso.
+  if (filters.pendMax != null && !finderData) void getFinder().then(() => applyFilters(), () => showToast('Dati di pendenza non disponibili.'))
+  if (filters.parcheggio && !accessData) void getAccess().then(() => applyFilters())
+  drawFinder()
   const cov = doneCoverage()
   doneSet = new Set([...cov].filter(([, c]) => c.complete).map(([id]) => id))
   startedSet = new Set([...cov].filter(([, c]) => !c.complete).map(([id]) => id))
@@ -1032,6 +1229,8 @@ function applyFilters(fromWeather = false): void {
       done: doneSet.has(t.id),
       started: startedSet.has(t.id),
       vol: wxSummaries.get(t.id)?.index ?? null,
+      slope: finderData ? (finderData.sentieri[t.id] ?? null) : undefined,
+      parking: accessData ? hasParking(t.id) : undefined,
     }
     if (matches(t, { ...ctx, vol: null }, { ...filters, volMin: null })) base.push(t)
     if (matches(t, ctx, filters)) {
@@ -1220,6 +1419,93 @@ let boardsSt: BoardsState | null = null
 let accountModule: Promise<typeof import('./account')> | null = null
 let currentSave: { trailId: string; box: HTMLElement } | null = null
 let currentMine: { trailId: string; box: HTMLElement } | null = null
+// ---- stato aperto/chiuso (status.ts): bollino in cima alla scheda + tendina con le fonti
+let currentStatus: { trailId: string; pill: HTMLElement; box: HTMLElement } | null = null
+let statusOpen = false
+let lastStatusTrail: string | null = null
+const osmStates = new Map<string, OsmState>()
+
+/** Sentieri SAT di cui fa parte la scheda (uno, o quelli usati dal percorso). */
+function statusTrails(id: string): Trail[] {
+  const r = isRoute(id) ? routes.get(id) : undefined
+  const ids = r ? [...new Set(r.build.pieces.map((p) => p.trail))] : [id]
+  return ids.map((x) => trails.get(x)).filter((t): t is Trail => !!t)
+}
+
+const myReports = (ids: string[]): ReportView[] =>
+  (acct?.segnalazioni ?? []).filter((r) => ids.includes(r.sentiero)).map((r) => ({ id: r.id, sentiero: r.sentiero, stato: r.stato, nota: r.nota, data: r.data, nome: r.nome, mine: r.autore === acct?.user?.uid }))
+
+function statusInput(id: string): StatusInput {
+  const ts = statusTrails(id)
+  const ids = ts.map((t) => t.id)
+  const avv = [...new Set(ids.flatMap((x) => avvisiBy.get(x) ?? []))].sort((a, b) => (b.data ?? '').localeCompare(a.data ?? ''))
+  return {
+    trails: ts,
+    isRoute: isRoute(id),
+    day,
+    today: today(),
+    closures: ids.flatMap((x) => closures[x] ?? []),
+    reports: myReports(ids).sort((a, b) => b.data.localeCompare(a.data)),
+    avvisi: avv,
+    avvisiFile: avvisiData,
+    osm: osmStates.get(`${id}|${day.slice(0, 7)}`) ?? { stato: 'caricamento' },
+  }
+}
+
+/** Sentieri chiusi secondo segnalazioni e avvisi (per "solo aperti", le card e la ricerca). */
+function reportedClosed(): string[] {
+  const ids = new Set<string>([...avvisiBy.keys(), ...(acct?.segnalazioni ?? []).map((r) => r.sentiero)])
+  const out: string[] = []
+  for (const id of ids) {
+    if (!trails.has(id)) continue
+    const inp = statusInput(id)
+    if (verdict({ ...inp, closures: [], osm: { stato: 'ok', trovati: [], quando: 0 } }).verdetto === 'chiuso') out.push(id)
+  }
+  return out
+}
+
+function startOsm(id: string, force = false): void {
+  const key = `${id}|${day.slice(0, 7)}`
+  if (!force && osmStates.has(key)) return
+  const line = trailLines.get(id)
+  const t = trails.get(id)
+  if (!line || !t) return
+  osmStates.set(key, { stato: 'caricamento' })
+  if (force) for (const k of Object.keys(localStorage)) if (k.startsWith(`osm-stato:${id}:`)) localStorage.removeItem(k)
+  void checkOsm(id, line, t.bbox, day).then((st) => {
+    osmStates.set(key, st)
+    if (currentStatus?.trailId === id) renderStatusBox()
+  })
+}
+
+function renderStatusBox(): void {
+  if (!currentStatus) return
+  const { trailId, pill, box } = currentStatus
+  if (!trails.has(trailId)) return
+  startOsm(trailId)
+  const inp = statusInput(trailId)
+  const res = verdict(inp)
+  pill.replaceChildren(
+    statusPill(res, () => {
+      statusOpen = true
+      renderStatusBox()
+      box.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }),
+  )
+  box.replaceChildren(
+    renderStatus(inp, res, statusOpen, (o) => (statusOpen = o), {
+      logged: acct?.status === 'pronto',
+      login: doLogin,
+      report: async (r) => (await loadAccount()).saveReport(r),
+      deleteReport: async (rid) => (await loadAccount()).deleteReport(rid),
+      retryOsm: () => {
+        startOsm(trailId, true)
+        renderStatusBox()
+      },
+      toast: showToast,
+    }),
+  )
+}
 let currentWx: { trailId: string; box: HTMLElement } | null = null
 let outingDraft: { trailId: string; draft: OutingDraft } | null = null
 let doneSet = new Set<string>() // sentieri completati (le uscite li coprono tutti)
@@ -1237,10 +1523,14 @@ function loadAccount(): Promise<typeof import('./account')> {
     accountModule
       .then((m) => {
         m.subscribe((st) => {
+          const reportsChanged = st.segnalazioni !== acct?.segnalazioni
           acct = st
+          // Nuove segnalazioni: cambiano i sentieri chiusi (filtro "solo aperti", card).
+          if (reportsChanged && appReady) applyDay()
           store('salvati-attivo', st.status !== 'anonimo')
           renderSaveBox()
           renderMyTrailBox()
+          renderStatusBox()
           renderSavedSheet()
           renderProfileView()
           renderAvatars()
@@ -1409,13 +1699,17 @@ function renderMyTrailBox(force = false): void {
   if (!trail) return
   const logged = acct?.status === 'pronto'
   if (outingDraft && outingDraft.trailId !== trailId) outingDraft = null
+  // Percorso personalizzato: le uscite che lo riguardano sono legate al percorso salvato.
+  const route = isRoute(trailId) ? routes.get(trailId) : undefined
+  const outs = !logged ? [] : route ? (route.savedId ? acct!.uscite.filter((o) => o.percorso === route.savedId) : []) : acct!.uscite.filter((o) => o.sentiero === trailId && !o.tratti?.length)
   box.replaceChildren(
     renderMyTrail({
       trail,
       line: trailLines.get(trailId),
       logged,
-      outings: logged ? acct!.uscite.filter((o) => o.sentiero === trailId) : [],
-      note: logged ? (acct!.note.get(trailId) ?? null) : null,
+      outings: outs,
+      noNote: !!route,
+      note: logged && !route ? (acct!.note.get(trailId) ?? null) : null,
       friends: logged ? appFriends() : [],
       draft: outingDraft?.draft ?? null,
       route: {
@@ -1429,18 +1723,53 @@ function renderMyTrailBox(force = false): void {
         renderMyTrailBox(true)
         if (d) box.querySelector('.outingform')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       },
-      a: outingActions(),
+      a: route ? routeOutingActions(trailId) : outingActions(),
     }),
   )
 }
+
+/** "Segna come fatto" su un percorso personalizzato: l'uscita registra i tratti SAT davvero fatti
+ *  (così contano nelle statistiche e sulla mappa) e resta legata al percorso, che se non era
+ *  ancora salvato viene salvato nei miei. */
+const routeOutingActions = (id: string): OutingActions => ({
+  ...outingActions(),
+  saveOuting: async (o, outingId) => {
+    const m = await loadAccount()
+    const r = routes.get(id)
+    if (!r) throw new Error('percorso non trovato')
+    if (!r.savedId || !acct?.percorsi.some((p) => p.id === r.savedId)) {
+      r.savedId = await m.saveRoute(toDoc(r.name, r.plan, r.build))
+      showToast('Percorso salvato anche nei miei')
+      renderSaveBox()
+    }
+    const L = r.build.line.length
+    const [a, b] = outingRange(o, L)
+    const tratti = routeParts(r.build, a, b)
+    if (!tratti.length) throw new Error('nessun tratto di sentiero in questa parte del percorso')
+    const done = { ...o, id: '', gpxKm: null, gpxDplus: null, percorso: null, percorsoKm: null, percorsoDplus: null, tratti: null }
+    await m.saveOuting(
+      {
+        ...o,
+        sentiero: tratti[0].s,
+        percorso: r.savedId,
+        percorsoNome: (r.name || r.build.trail.titolo).slice(0, 80),
+        tratti,
+        percorsoKm: o.gpxKm ?? outingKm(done, r.build.trail, L),
+        percorsoDplus: o.gpxDplus ?? outingDplus(done, r.build.trail, r.build.profile, L),
+      },
+      outingId,
+    )
+  },
+})
 
 /** Parte fatta di ogni sentiero toccato dalle mie uscite. */
 function doneCoverage(): Map<string, ReturnType<typeof coverage>> {
   const out = new Map<string, ReturnType<typeof coverage>>()
   if (acct?.status !== 'pronto') return out
-  const by = new Map<string, Outing[]>()
-  for (const o of acct.uscite) if (trails.has(o.sentiero)) by.set(o.sentiero, [...(by.get(o.sentiero) ?? []), o])
-  for (const [id, list] of by) out.set(id, coverage(list, trailLines.get(id)?.length ?? trails.get(id)!.lunghezza_m ?? 0))
+  const lenOf = (id: string) => trailLines.get(id)?.length ?? trails.get(id)?.lunghezza_m ?? 0
+  const by = new Map<string, [number, number][]>()
+  for (const o of acct.uscite) for (const p of outingParts(o, lenOf)) if (trails.has(p.trail) && !isRoute(p.trail)) by.set(p.trail, [...(by.get(p.trail) ?? []), p.range])
+  for (const [id, list] of by) out.set(id, coverageOf(list, lenOf(id)))
   return out
 }
 
@@ -2645,3 +2974,4 @@ async function handleReferral(): Promise<void> {
 if (pendingInvite || referral || stored('salvati-attivo', false)) loadAccount()
 
 applyDay()
+appReady = true

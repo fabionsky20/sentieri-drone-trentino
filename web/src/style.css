@@ -4007,3 +4007,67 @@ a.access-go {
   align-items: center;
   gap: 2px;
 }
+
+/* ---- Percorsi combinati ("Trova percorsi") */
+.finder { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.finder .finder-sum { color: var(--muted); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.finder .cards .card-main { display: flex; flex-direction: column; gap: 3px; }
+.pill.tiny.combo { background: var(--hl, #7C3AED); color: #fff; border-color: transparent; }
+
+/* ---- stato aperto/chiuso (status.ts) ---- */
+
+.statuspill-host { display: contents; }
+button.pill.statuspill { cursor: pointer; font: inherit; font-size: 13px; font-weight: 500; color: var(--ink); background: var(--panel); }
+.pill.check { border-color: var(--giallo); }
+.dot.giallo { background: var(--giallo); }
+.dot.muted { background: var(--line); }
+
+.statusacc .wxsum .srcstate { margin-left: auto; }
+.statusbody { display: grid; gap: 10px; }
+.statusmotivo { margin: 0; font-weight: 500; }
+
+.srcblock {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  background: var(--panel);
+}
+.srchead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.srcname { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.srchead .srcstate { margin-left: auto; }
+.srcstate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.srcstate.inline { font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: var(--panel2); }
+.srcstate.inline.chiuso { box-shadow: inset 2px 0 0 var(--rosso); }
+.srcstate.inline.aperto { box-shadow: inset 2px 0 0 var(--verde); }
+.srcstate.inline.attenzione { box-shadow: inset 2px 0 0 var(--giallo); }
+.srclist { margin: 0; padding-left: 16px; display: grid; gap: 4px; font-size: 13px; }
+.srclist a { color: var(--accent); overflow-wrap: anywhere; }
+.srclist svg, .srcblock a svg { vertical-align: -1px; }
+.srcblock p { margin: 0; }
+.srcblock a { color: var(--accent); }
+.srclist .iconbtn.small { min-height: 28px; min-width: 28px; vertical-align: middle; }
+
+.reportform { display: grid; gap: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.reportrow { display: grid; grid-template-columns: auto 1fr; gap: 6px; }
+.reportrow input, .reportform select { min-height: 40px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; font: inherit; font-size: 14px; background: var(--panel); color: var(--ink); min-width: 0; }
+.reportbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.reportbtns .btn-outline { flex: 1 1 0; min-height: 40px; font-size: 12px; }
+.reportbtns .rep-chiuso { border-color: var(--rosso); }
+.reportbtns .rep-pericolo { border-color: var(--giallo); }
+.reportbtns .rep-aperto { border-color: var(--verde); }
+@media (max-width: 420px) {
+  .reportrow { grid-template-columns: 1fr; }
+}

@@ -184,6 +184,15 @@ docs/            documentazione (DATA.md, ROADMAP.md, ACCOUNT.md)
 - Reti non collegate: mezzo percorso da ciascun lato verso la coppia di punti più vicina, buco tratteggiato arancione con etichetta. Meta POI fuori sentiero: ultimo pezzo tratteggiato con i metri. Pezzi < 50 m nascosti nel testo.
 - Salvataggio: `users/{uid}/percorsi` (I miei, nome modificabile) e `boards/{b}/percorsi` (copia di chi lo aggiunge, notifica `percorso`). Si salvano tratti SAT + partenza/arrivo + geometria (polyline): se i tratti non tornano più con lo shapefile nuovo, il percorso si ricalcola da partenza e arrivo. Nessun dato di volo.
 
+## Novembre 2026: percorsi combinati, stato aperto/chiuso, "fatto" sui percorsi
+
+- **Trova percorsi** (pannello Filtri, `finder.ts` + `finderui.ts`, dati `finder.json` da `pipeline/finder.py`, DATA.md §9): mete = categorie di "Passa vicino a"; usa lunghezza min/max (SOLO ANDATA, default max 15 km), quota min/max raggiunta, D+ max, pendenza max, difficoltà, "solo aperti"; opzione "solo zona visibile". Un risultato si apre come percorso personalizzato (`openFound`): se il calcolo normale sceglierebbe un'altra strada si aggiungono punti intermedi a metà dei pezzi. Cambiare i filtri invalida i risultati.
+- **Filtri nuovi**: Lunghezza min, Quota max raggiunta, Pendenza max (`finder.json` → `sentieri`), Con parcheggio vicino (`access.json`, parcheggio a un capo).
+- **Stato aperto/chiuso** (`status.ts`): bollino in cima alla scheda + tendina "Aperto o chiuso?" con le fonti: chiusure dell'app (closures.yaml), segnalazioni sul posto (Firestore `segnalazioni`, lette da tutti con login, ognuno scrive/cancella le proprie), comunicati Provincia + Google News (`avvisi.json`, DATA.md §10, Action giornaliera), OpenStreetMap via Overpass dal browser (divieti, dismessi, stagionali, pericoli, note sui tratti sotto la linea; cache 24 h in localStorage `osm-stato:*`), link per il controllo manuale. Verdetto: APERTO / CHIUSO / DA VERIFICARE (`verdict`). I chiusi da segnalazioni e avvisi entrano in `closedIds` (filtro "solo aperti", card); OSM solo nella scheda.
+- **"Segna come fatto" sui percorsi personalizzati**: l'uscita salva `percorso` (id nei miei; il percorso viene salvato se non lo era), `percorso_nome`, `tratti` (parti SAT fatte, `routeParts` da `RouteBuild.placed`), `percorso_km`, `percorso_dplus`; `sentiero` = primo tratto. Copertura e statistiche usano `outingParts`. Niente nota personale sui percorsi.
+- `firestore.rules` aggiornate (uscite con tratti, `segnalazioni`): **vanno pubblicate a mano dalla console**.
+- Prova: `node e2e/nuove.mjs [url] [cartella] [canale]` (Overpass finto).
+
 ## Prove automatiche (nel repo)
 
 - `web/e2e/` (playwright-core con Edge installato, nessun browser scaricato): `npm run build`, `npx vite preview --port 4173`, poi `npm run e2e` (scheda + percorsi + evidenziazione e 3D in `vista3d.mjs`, serve la scheda grafica: col rendering software il 3D va a 1 fotogramma al secondo; oppure `node e2e/scheda.mjs <url>` per il sito online). `e2e/mock.mjs` intercetta Open-Meteo/NOAA (non consuma la quota). Screenshot in `web/e2e/screenshot/` (ignorati da git).

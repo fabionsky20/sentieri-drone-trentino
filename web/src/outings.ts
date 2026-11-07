@@ -21,6 +21,13 @@ export interface Outing {
   partenza: 'inizio' | 'fine'
   finoM: number | null
   ar: boolean // andata e ritorno: km e dislivello contati nei due versi
+  // Uscita su un percorso personalizzato: `sentiero` = primo tratto, `tratti` = parti dei sentieri
+  // SAT fatte; parziale/partenza/finoM sono misurati lungo il percorso. Assenti nelle altre uscite.
+  percorso: string | null // id del percorso salvato nei miei
+  percorsoNome: string | null
+  tratti: { s: string; a: number; b: number }[] | null
+  percorsoKm: number | null // km della parte fatta (× 2 se andata e ritorno)
+  percorsoDplus: number | null
 }
 
 export type OutingInput = Omit<Outing, 'id'>
@@ -199,9 +206,19 @@ export function outingRange(o: Pick<Outing, 'parziale' | 'partenza' | 'finoM'>, 
   return o.partenza === 'fine' ? [length - f, length] : [0, f]
 }
 
+/** Parti di sentiero SAT fatte da un'uscita: un tratto per le uscite normali, più tratti per i percorsi. */
+export function outingParts(o: Outing, lenOf: (id: string) => number): { trail: string; range: [number, number] }[] {
+  if (o.tratti?.length) return o.tratti.map((t) => ({ trail: t.s, range: [Math.max(0, t.a), Math.min(lenOf(t.s) || t.b, t.b)] as [number, number] }))
+  return [{ trail: o.sentiero, range: outingRange(o, lenOf(o.sentiero)) }]
+}
+
 /** Unione delle parti fatte di un sentiero. */
 export function coverage(list: Outing[], length: number): { ranges: [number, number][]; done: number; complete: boolean } {
-  const rs = list.map((o) => outingRange(o, length)).sort((a, b) => a[0] - b[0])
+  return coverageOf(list.map((o) => outingRange(o, length)), length)
+}
+
+export function coverageOf(ranges: [number, number][], length: number): { ranges: [number, number][]; done: number; complete: boolean } {
+  const rs = [...ranges].sort((a, b) => a[0] - b[0])
   const out: [number, number][] = []
   for (const r of rs) {
     const last = out[out.length - 1]
@@ -231,6 +248,7 @@ function climb(p: Profile, a: number, b: number): number {
 /** Km dell'uscita: dal GPX, altrimenti la parte di sentiero fatta (× 2 se andata e ritorno). */
 export function outingKm(o: Outing, t: Trail | undefined, length?: number): number {
   if (o.gpxKm != null) return o.gpxKm
+  if (o.percorsoKm != null) return o.percorsoKm
   const L = length ?? t?.lunghezza_m ?? 0
   const [a, b] = outingRange(o, L)
   return ((b - a) / 1000) * (o.ar ? 2 : 1)
@@ -239,6 +257,7 @@ export function outingKm(o: Outing, t: Trail | undefined, length?: number): numb
 /** Dislivello positivo dell'uscita: dal GPX, altrimenti dal profilo della parte fatta. */
 export function outingDplus(o: Outing, t: Trail | undefined, profile?: Profile, length?: number): number {
   if (o.gpxDplus != null) return o.gpxDplus
+  if (o.percorsoDplus != null) return o.percorsoDplus
   if (!t) return 0
   const L = length ?? t.lunghezza_m ?? 0
   const [a, b] = outingRange(o, L)
@@ -297,15 +316,16 @@ export function computeStats(
   let km = 0
   let dplus = 0
   let piuLunga: Stats['piuLunga'] = null
-  const byTrail = new Map<string, Outing[]>()
+  const byTrail = new Map<string, [number, number][]>()
   for (const o of list) {
-    const t = trails.get(o.sentiero)!
+    const t0 = trails.get(o.sentiero)!
+    const t = o.percorsoNome ? { ...t0, titolo: o.percorsoNome, numero: 'PERCORSO' } : t0
     const L = lenOf(o.sentiero)
     const k = outingKm(o, t, L)
     const d = outingDplus(o, t, profiles?.[o.sentiero], L)
     km += k
     dplus += d
-    byTrail.set(o.sentiero, [...(byTrail.get(o.sentiero) ?? []), o])
+    for (const part of outingParts(o, lenOf)) if (trails.has(part.trail)) byTrail.set(part.trail, [...(byTrail.get(part.trail) ?? []), part.range])
     const mi = Number(o.data.slice(5, 7)) - 1
     if (mi >= 0 && mi < 12) {
       mesi[mi].km += k
@@ -319,10 +339,10 @@ export function computeStats(
   const parti = new Map<string, [number, number][]>()
   const raccolti: Stats['raccolti'] = Object.fromEntries(COLLECT.map((c) => [c, []]))
   const seen = new Set<string>()
-  for (const [id, outs] of byTrail) {
+  for (const [id, rs] of byTrail) {
     const t = trails.get(id)!
     const L = lenOf(id)
-    const cov = coverage(outs, L)
+    const cov = coverageOf(rs, L)
     parti.set(id, cov.ranges)
     if (cov.complete) completati++
     const inside = (m: number) => cov.ranges.some(([a, b]) => m >= a - 1 && m <= b + 1)

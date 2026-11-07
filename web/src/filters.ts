@@ -21,6 +21,9 @@ export interface FilterState {
   lungMax: number | null
   dislMax: number | null // m di dislivello positivo
   quotaMin: number | null // quota massima raggiunta, almeno (m)
+  quotaMax: number | null // quota massima raggiunta, al massimo (m)
+  pendMax: number | null // pendenza massima (%) su ~100 m, dal profilo LiDAR
+  parcheggio: boolean // parcheggio pubblico vicino a un capo del sentiero
   gruppo: string // '' = tutti
   fatti: Fatti
   segnaFatti: boolean // segno sulla mappa per i sentieri già fatti (non è un filtro)
@@ -40,6 +43,9 @@ export const defaultFilters = (): FilterState => ({
   lungMax: null,
   dislMax: null,
   quotaMin: null,
+  quotaMax: null,
+  pendMax: null,
+  parcheggio: false,
   gruppo: '',
   fatti: '',
   segnaFatti: true,
@@ -56,7 +62,9 @@ export function activeCount(f: FilterState): number {
     Number(f.difficolta.size > 0) +
     Number(f.lungMin != null || f.lungMax != null) +
     Number(f.dislMax != null) +
-    Number(f.quotaMin != null) +
+    Number(f.quotaMin != null || f.quotaMax != null) +
+    Number(f.pendMax != null) +
+    Number(f.parcheggio) +
     Number(!!f.gruppo) +
     Number(f.soloAperti) +
     Number(!!f.salvati) +
@@ -76,6 +84,8 @@ export interface TrailContext {
   done: boolean // completato (le uscite coprono tutto il sentiero)
   started: boolean // iniziato ma non finito
   vol: number | null // indice di volabilità del giorno (null = non calcolato)
+  slope?: number | null // pendenza massima (%); undefined = dati non ancora caricati
+  parking?: boolean // parcheggio vicino a un capo; undefined = dati non ancora caricati
 }
 
 export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
@@ -96,6 +106,9 @@ export function matches(t: Trail, ctx: TrailContext, f: FilterState): boolean {
   if (f.lungMax != null && lung > f.lungMax) return false
   if (f.dislMax != null && (t.dislivello_pos ?? 0) > f.dislMax) return false
   if (f.quotaMin != null && (t.quota_max ?? 0) < f.quotaMin) return false
+  if (f.quotaMax != null && (t.quota_max ?? 0) > f.quotaMax) return false
+  if (f.pendMax != null && ctx.slope != null && ctx.slope > f.pendMax) return false
+  if (f.parcheggio && ctx.parking === false) return false
   if (f.gruppo && t.gruppo_montuoso !== f.gruppo) return false
   if (f.volMin != null && (ctx.vol == null || ctx.vol < f.volMin)) return false
   return true
@@ -226,7 +239,11 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
   const grid = h(
     'div',
     { class: 'tilegrid' },
-    sliderTile('Lunghezza max', f.lungMax, { min: 1, max: 40, step: 1, off: 40, fmt: (v) => `≤ ${v} km` }, (v) => {
+    sliderTile('Lunghezza min', f.lungMin, { min: 0, max: 30, step: 0.5, off: 0, fmt: (v) => `≥ ${v.toLocaleString('it-IT')} km` }, (v) => {
+      f.lungMin = v
+      onChange()
+    }),
+    sliderTile('Lunghezza max', f.lungMax, { min: 1, max: 40, step: 0.5, off: 40, fmt: (v) => `≤ ${v.toLocaleString('it-IT')} km` }, (v) => {
       f.lungMax = v
       onChange()
     }),
@@ -236,6 +253,14 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     }),
     sliderTile('Quota min raggiunta', f.quotaMin, { min: 0, max: 3200, step: 100, off: 0, fmt: (v) => `≥ ${fmtM(v)}` }, (v) => {
       f.quotaMin = v
+      onChange()
+    }),
+    sliderTile('Quota max raggiunta', f.quotaMax, { min: 300, max: 3600, step: 100, off: 3600, fmt: (v) => `≤ ${fmtM(v)}` }, (v) => {
+      f.quotaMax = v
+      onChange()
+    }),
+    sliderTile('Pendenza max', f.pendMax, { min: 10, max: 100, step: 5, off: 100, fmt: (v) => `≤ ${v} %` }, (v) => {
+      f.pendMax = v
       onChange()
     }),
     h('label', { class: 'tile' }, h('span', { class: 'tile-k' }, 'Gruppo montuoso'), select),
@@ -261,6 +286,10 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     { class: 'switches' },
     switchRow('Solo sentieri aperti', f.soloAperti, (on) => {
       f.soloAperti = on
+      onChange()
+    }),
+    switchRow('Con parcheggio vicino', f.parcheggio, (on) => {
+      f.parcheggio = on
       onChange()
     }),
     switchRow('Solo salvati', !!f.salvati, (on) => {
@@ -321,7 +350,7 @@ export function renderForm(f: FilterState, gruppi: string[], onChange: () => voi
     h('section', {}, label('Volabilità del giorno'), volTile, ordina, h('div', { class: 'switches' }, colora), volHelp),
     h('section', {}, label('Passa vicino a'), near),
     h('section', {}, label('Difficoltà'), diff),
-    h('section', {}, grid),
+    h('section', {}, grid, h('p', { class: 'hint' }, 'Lunghezza: solo andata. Pendenza: il tratto più ripido su 100 m, in salita o in discesa (es. 30 % = 30 m di dislivello ogni 100 m).')),
     h('section', {}, switches),
     h('section', {}, label('Sentieri fatti'), fatti, h('div', { class: 'switches' }, segna)),
   )

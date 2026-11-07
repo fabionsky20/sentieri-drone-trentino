@@ -12,6 +12,7 @@
 //   ├ note/{trail}                  note personali sui sentieri
 //   ├ percorsi/{id}                 percorsi personalizzati salvati (tratti SAT + geometria)
 //   └ amici/{uid}                   amici entrati con il mio link (li scrive l'invitato, li leggo io)
+// - segnalazioni/{id}               stato dei sentieri visto sul posto (chiuso/pericolo/aperto), letto da tutti
 // - profili/{uid}                   rubrica pubblica (solo nome e foto) per la ricerca degli amici
 // - codiciInvito/{codice}           link "Invita amici": chi invita (uid e nome), leggibile col codice
 // - boards/{board}                  bacheca: nome, copertina, proprietario
@@ -324,7 +325,16 @@ service cloud.firestore {
       return d.keys().hasAll(['sentiero', 'data', 'con', 'conUid', 'drone', 'creato', 'aggiornato'])
         && d.keys().hasOnly(['sentiero', 'data', 'con', 'conUid', 'commento', 'drone',
                              'gpx_km', 'gpx_dplus', 'parziale', 'partenza', 'fino_m', 'ar',
+                             'percorso', 'percorso_nome', 'tratti', 'percorso_km', 'percorso_dplus',
                              'creato', 'aggiornato'])
+        // Uscita su un percorso personalizzato: tratti SAT fatti (al massimo 200), km e D+.
+        && (d.get('percorso', null) == null || str(d.percorso, 1, 40))
+        && optStr(d.get('percorso_nome', null), 80)
+        && (d.get('tratti', null) == null || (d.tratti is list && d.tratti.size() <= 200))
+        && (d.get('percorso_km', null) == null
+            || (d.percorso_km is number && d.percorso_km >= 0 && d.percorso_km <= 500))
+        && (d.get('percorso_dplus', null) == null
+            || (d.percorso_dplus is int && d.percorso_dplus >= 0 && d.percorso_dplus <= 30000))
         // Uscita parziale ("fin dove sono arrivato"): capo di partenza e metri fatti da lì.
         // Senza questi campi (uscite già salvate) l'uscita è completa, solo andata.
         && d.get('parziale', false) is bool
@@ -382,6 +392,25 @@ service cloud.firestore {
         && optStr(request.resource.data.get('avatar', null), 600)
         && request.resource.data.aggiornato == request.time;
       allow delete: if isOwner(uid);
+    }
+
+    // ---------------------------------------------------------------- segnalazioni
+    // Stato dei sentieri visto sul posto (chiuso / pericolo / aperto): lo leggono tutti gli
+    // utenti con login (serve allo stato "aperto/chiuso" della scheda); ognuno scrive e
+    // cancella solo le proprie. Nessun dato di volo.
+    match /segnalazioni/{r} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['sentiero', 'stato', 'nota', 'data', 'autore', 'nome', 'creato'])
+        && request.resource.data.keys().hasAll(['sentiero', 'stato', 'data', 'autore', 'nome', 'creato'])
+        && validTrail(request.resource.data.sentiero)
+        && request.resource.data.stato in ['chiuso', 'pericolo', 'aperto']
+        && optStr(request.resource.data.get('nota', null), 300)
+        && outingDate(request.resource.data.data)
+        && request.resource.data.autore == request.auth.uid
+        && str(request.resource.data.nome, 1, 60)
+        && request.resource.data.creato == request.time;
+      allow delete: if signedIn() && resource.data.autore == request.auth.uid;
     }
 
     // ---------------------------------------------------------------- bacheche

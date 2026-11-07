@@ -328,10 +328,15 @@ function outingForm(trail: Trail, line: TrailLine | undefined, draft: OutingDraf
           partenza: draft.partenza,
           finoM: draft.parziale ? Math.round(draft.finoM ?? 0) : null,
           ar: draft.ar,
+          percorso: null,
+          percorsoNome: null,
+          tratti: null,
+          percorsoKm: null,
+          percorsoDplus: null,
         },
         draft.id ?? undefined,
       )
-      a.toast(draft.id ? 'Uscita aggiornata.' : draft.parziale ? `${trail.numero}: fatti ${it((draft.finoM ?? 0) / 1000, 1)} km.` : `${trail.numero} segnato come fatto.`)
+      a.toast(draft.id ? 'Uscita aggiornata.' : trail.numero === 'PERCORSO' ? (draft.parziale ? `Percorso: fatti ${it((draft.finoM ?? 0) / 1000, 1)} km.` : 'Percorso segnato come fatto.') : draft.parziale ? `${trail.numero}: fatti ${it((draft.finoM ?? 0) / 1000, 1)} km.` : `${trail.numero} segnato come fatto.`)
       done()
     }, a)
   })
@@ -372,6 +377,7 @@ export interface MyTrailCtx {
   setDraft: (d: OutingDraft | null) => void
   a: OutingActions
   route: RouteHelpers
+  noNote?: boolean // percorsi personalizzati: niente nota (le note sono per sentiero SAT)
 }
 
 export function renderMyTrail(c: MyTrailCtx): HTMLElement {
@@ -421,6 +427,7 @@ export function renderMyTrail(c: MyTrailCtx): HTMLElement {
   if (c.draft) sec.append(outingForm(c.trail, c.line, c.draft, c.friends, c.a, c.route, () => c.setDraft(null)))
   else sec.append(btn('btn-outline wide', [icon('check', 18), n ? 'SEGNA UN’ALTRA USCITA' : 'SEGNA COME FATTO'], () => c.setDraft(newDraft())))
 
+  if (c.noNote) return sec
   // Nota personale: si salva quando si esce dal campo.
   const note = h('textarea', { rows: '3', maxlength: '2000', placeholder: 'Parcheggio, punti per il decollo, cosa rifare…', 'aria-label': 'Nota personale' }) as HTMLTextAreaElement
   note.value = c.note ?? ''

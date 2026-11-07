@@ -87,7 +87,7 @@ export interface Piece {
 
 // ---------------------------------------------------------------- Dijkstra
 
-class Heap {
+export class Heap {
   private k: number[] = []
   private v: number[] = []
   get size(): number {

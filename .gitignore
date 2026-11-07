@@ -20,3 +20,6 @@ Thumbs.db
 web/e2e/screenshot*/
 firebase-test/node_modules/
 firebase-test/*.log
+
+# avvisi di chiusura: generati nella GitHub Action ogni giorno (pipeline/avvisi.py)
+data/processed/avvisi.json

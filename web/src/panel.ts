@@ -166,6 +166,8 @@ export interface TrailView {
   preview?: HTMLElement // anteprima di volo 3D, riempito da chi chiama
   access?: HTMLElement // come arrivare in auto, riempito da chi chiama
   intro?: HTMLElement // percorso personalizzato: tratti usati (dopo i riquadri)
+  /** Stato aperto/chiuso dall'incrocio delle fonti (status.ts): bollino in cima + tendina. */
+  status?: { pill: HTMLElement; box: HTMLElement }
   onZone: (ids: string[]) => void
   onPoi: (id: string) => void
   onFit: () => void
@@ -249,7 +251,7 @@ export function renderTrail(v: TrailView): HTMLElement {
       { class: 'chiprow' },
       chip(trail.numero, 'code mono'),
       diff ? chip(diff, 'mono', `${diff} · ${DIFFICOLTA[diff] ?? ''}`) : null,
-      h('span', { class: `pill ${open ? 'open' : 'closed'}` }, h('i', { class: `dot ${open ? 'verde' : 'rosso'}` }), open ? 'APERTO' : 'CHIUSO'),
+      v.status?.pill ?? h('span', { class: `pill ${open ? 'open' : 'closed'}` }, h('i', { class: `dot ${open ? 'verde' : 'rosso'}` }), open ? 'APERTO' : 'CHIUSO'),
     ),
     h('h2', { class: 'title' }, trail.titolo),
     sub ? h('p', { class: 'subtitle' }, sub) : null,
@@ -261,7 +263,7 @@ export function renderTrail(v: TrailView): HTMLElement {
       tile('Q.MAX', trail.quota_max != null ? `${intIt(trail.quota_max)} m` : '–', trail.quota_min != null ? `min ${intIt(trail.quota_min)} m` : null),
       tile('TEMPO', hm(trail.tempo_andata), trail.tempo_ritorno ? `ritorno ${hm(trail.tempo_ritorno)}` : null),
     ),
-    closureSection(v.closures),
+    v.status?.box ?? closureSection(v.closures),
     v.intro ?? null,
     h(
       'section',
